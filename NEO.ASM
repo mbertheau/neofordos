@@ -1,23 +1,37 @@
 ; Neo, layers 1-6, for the IBM 5160 and later PCs.
 ;
-; The BIOS keyboard handler stays in place. On a BIOS that calls
-; INT 15h AH=4Fh, that intercept is the only hook: carry set gives the
-; byte back to the BIOS, carry clear drops it. On an older XT BIOS the
-; INT 09h wrapper reads port 60h without pulsing port 61h bit 7, so the
-; scan byte is still there for the BIOS when this driver does not want it.
+; Read this file from the top. A keystroke executes only the resident
+; driver, which ends at resident_end. The installer, the status report,
+; and the self-test follow that label. DOS releases them when the
+; driver stays resident.
 ;
-; This driver takes Mod3, Mod4, and the main typing block. Shift, Ctrl,
-; left Alt, the function keys, the keypad, and the system chords stay
-; with the BIOS. An E0 prefix and the byte after it are not split: the
-; prefix is given to the BIOS, and a following byte is kept only when it
-; is AltGr. The E0 flag at 0040:0096 is cleared when that byte is kept.
-; E0 2A / E0 AA is the fake shift the keyboard sends around a Num Lock
-; arrow; it is given back to the BIOS and is not a Shift press.
+; The BIOS keyboard handler stays in place. A BIOS that calls INT 15h
+; AH=4Fh is hooked only there. Carry set means the BIOS keeps the scan
+; byte in AL. Carry clear means the BIOS discards it. An older XT BIOS
+; has no such call, so the driver wraps INT 09h. The wrapper reads port
+; 60h without pulsing port 61h bit 7, and the scan byte is still in the
+; controller when the BIOS should handle the key.
 ;
-; Characters are code page 437. Dead keys produce the spacing ASCII
-; character. Shift on the sz key produces S then S.
-; Layers 5 and 6 are used when code page 437 has the character.
-
+; The driver owns Mod3, Mod4, and the main typing block. Shift, the real
+; Ctrl key, left Alt, the function keys, and the system chords stay with
+; the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
+; An E0 prefix is given to the BIOS. The byte after it is kept only when
+; it is AltGr, and the prefix bits at 0040:0096 are then cleared. E0 2A
+; and E0 AA are the fake shift around a Num Lock arrow. They go back to
+; the BIOS and are not a Shift press.
+;
+; Output is code page 437. A dead key produces the spacing ASCII
+; character. Shift on sz produces S, then S, because a capital sz is not
+; in the font. Layers 5 and 6 are produced when the font has the glyph.
+;
+; The cost of a key is one pass through the interrupt, with interrupts
+; left off, as the BIOS entered it. The pass is a chain of comparisons
+; and a multiply that indexes the layer table. Nothing scans the table,
+; and nothing polls. A letter is looked up twice: once to see whether
+; capitals apply, and once to load the chosen layer. On a machine that
+; uses the 4Fh hook, every other INT 15h call pays for a compare and a
+; far jump back to the BIOS. The resident size is resident_end, rounded
+; up to a paragraph, and that count includes the PSP.
 .MODEL TINY
 .CODE
 ORG 100h
@@ -25,10 +39,26 @@ ORG 100h
 start:
     jmp init
 
-; Signature sits immediately in front of whichever entry is hooked.
-; The word after it is the offset of neo_state in this segment.
+; A resident copy is recognized by the four bytes NEO2 placed
+; immediately in front of the hooked entry. The word after those bytes
+; is the offset of neo_state in the resident segment. Install, status,
+; and unload follow that word, so they never use an address taken from
+; the transient copy.
     db 'NEO2'
     dw OFFSET neo_state
+; INT 15h. AH is the BIOS function. Anything other than 4Fh is returned
+; to the saved vector at once. A 4Fh call is one scan byte, make or
+; break, in AL. The BIOS has already read port 60h, and this path must
+; not read it: the read would empty the controller.
+;
+; fingers = 0 is the 102-key map, and only that map consults the prefix
+; flags at 0040:0096. Bit 0 is the E1 prefix and bit 1 is E0. An E1
+; sequence is given back. An E0 byte sets seen_e0 for the decision
+; below. When the byte is eaten, both prefix bits are cleared.
+;
+; give holds the carry decision across the register restores. After
+; push bp / mov bp,sp the saved flags of this interrupt are at [bp+6].
+; Clearing bit 0 of that word clears carry.
 neo15:
     cmp ah, 4Fh
     je n15_body
@@ -86,6 +116,12 @@ n15_iret:
 
     db 'NEO2'
     dw OFFSET neo_state
+; INT 09h, used only when the BIOS never calls INT 15h AH=4Fh. The scan
+; byte is peeked before port 61h is touched. Carry set jumps to the
+; saved BIOS handler, which still sees the same byte. Carry clear means
+; this driver owns the key: bit 7 of port 61h is pulsed and the other
+; bits are put back, the typeahead word is written, and EOI is sent to
+; port 20h. The 83-key keyboard has no E0 prefix, so seen_e0 stays clear.
 neo09:
     push ax
     push bx
@@ -130,9 +166,21 @@ n09_pass:
     pop ax
     jmp dword ptr cs:oldptr
 
-; --- resident state -------------------------------------------------------
-; Offsets from neo_state are used by the transient copy when it reports
-; on a copy that is already resident.
+; Resident variables. A command that finds an already resident copy
+; adds these offsets to the neo_state pointer stored in front of the
+; hook.
+;
+; fingers is 0 for the 102-key map and 1 for the 83-key map. mod3a and
+; mod3b are the two Mod3 keys. mod4a and mod4b are the two Mod4 keys.
+; A held key repeats, and a repeat must not toggle capitals or suspend,
+; so the flag remembers that the key is already down. caps is this
+; driver's capital state. BIOS bit 6 of 0040:0017 is kept in step with
+; it, and the Caps Lock scan is never passed through, so the BIOS does
+; not fight that bit. paused is suspend: both Mod3 keys together invert
+; it. nout, nword0, and nword1 are the characters waiting to be written.
+; hits counts scan bytes seen, and eaten counts bytes this driver kept.
+; oldptr is the BIOS vector that was replaced. hook15 says which vector
+; that was. modelb is the byte at F000:FFFE.
 
 neo_state:
 fingers db 0
@@ -155,108 +203,211 @@ oldseg  dw 0
 hook15  db 0
 modelb  db 0
 
-; Four words per scan code, layers 1..4. Scan codes 00h..56h.
-; A word is the typeahead value: low byte ASCII, high byte scan.
-; Six words per scan code, layers 1..6. Scan codes 00h..56h.
-; A word is the typeahead value: low byte character, high byte scan.
-; An empty word produces nothing. Layers 5 and 6 hold only the
-; characters code page 437 can draw.
+; The layer table is indexed by the physical scan code: the position on
+; a German keyboard, not the letter printed on the key. Scan 02h is the
+; 1 key. The top letter row, 10h through 1Bh, becomes
+; x v l c w k h g f q sz and the acute key. The home row, 1Eh through
+; 28h, becomes u i a e o s n r t d y. The bottom row, 2Ch through 35h,
+; becomes ue oe ae p z b m , . j. Scan 29h is the key left of 1. Scan
+; 39h is the space bar. The keypad scans, 45h and 47h through 53h, are
+; reached only while Mod3 or Mod4 is held.
+;
+; Each row is seven bytes. The first five are the characters for layers
+; 1, 2, 3, 5, and 6. The last two are the layer 4 typeahead word. A
+; character byte of 00h produces nothing. Any other byte is returned
+; with this row's scan code in the high half of the word. Layer 4 is
+; stored whole because its scan code is often a different key: an arrow,
+; a keypad digit, Tab, Esc, Enter, or Backspace. On the keypad's own
+; keys, layer 4 uses the row scan with a zero character, for Home, the
+; arrows, Insert, and Delete. That zero is a real key, which is why
+; layer 4 is not packed into one byte. The number at the end of a row
+; is its scan code.
 laytab:
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0231h, 02F8h, 0000h, 02A6h, 0000h, 02AAh
-    dw 0332h, 0315h, 03FDh, 03A7h, 0000h, 0000h
-    dw 0433h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0534h, 05AFh, 0000h, 0000h, 0000h, 0000h
-    dw 0635h, 06AEh, 0000h, 06FAh, 0000h, 0000h
-    dw 0736h, 0724h, 079Bh, 079Ch, 0000h, 0000h
-    dw 0837h, 0000h, 089Dh, 0000h, 0000h, 0000h
-    dw 0938h, 0000h, 0000h, 0F09h, 0000h, 09ECh
-    dw 0A39h, 0000h, 0000h, 0A2Fh, 0000h, 0000h
-    dw 0B30h, 0000h, 0000h, 0B2Ah, 0000h, 0000h
-    dw 0C2Dh, 0C2Dh, 0000h, 4A2Dh, 0000h, 0000h
-    dw 0D60h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 1078h, 1058h, 0000h, 4900h, 0000h, 0000h
-    dw 1176h, 1156h, 115Fh, 0E08h, 0000h, 11FBh
-    dw 126Ch, 124Ch, 125Bh, 4800h, 0000h, 0000h
-    dw 1363h, 1343h, 135Dh, 5300h, 0000h, 0000h
-    dw 1477h, 1457h, 145Eh, 5100h, 0000h, 14EAh
-    dw 156Bh, 154Bh, 1521h, 15ADh, 0000h, 0000h
-    dw 1668h, 1648h, 163Ch, 4737h, 0000h, 0000h
-    dw 1767h, 1747h, 173Eh, 4838h, 0000h, 17E2h
-    dw 1866h, 1846h, 183Dh, 4939h, 18EDh, 18E8h
-    dw 1971h, 1951h, 1926h, 4E2Bh, 0000h, 0000h
-    dw 1AE1h, 0000h, 0000h, 4A2Dh, 0000h, 0000h
-    dw 1B27h, 0000h, 1B2Fh, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 1E75h, 1E55h, 1E5Ch, 4700h, 0000h, 0000h
-    dw 1F69h, 1F49h, 1F2Fh, 4B00h, 0000h, 0000h
-    dw 2061h, 2041h, 207Bh, 5000h, 20E0h, 0000h
-    dw 2165h, 2145h, 217Dh, 4D00h, 21EEh, 0000h
-    dw 226Fh, 224Fh, 222Ah, 4F00h, 0000h, 0000h
-    dw 2373h, 2353h, 233Fh, 23A8h, 23E5h, 23E4h
-    dw 246Eh, 244Eh, 2428h, 4B34h, 0000h, 0000h
-    dw 2572h, 2552h, 2529h, 4C35h, 0000h, 0000h
-    dw 2674h, 2654h, 262Dh, 4D36h, 26E7h, 0000h
-    dw 2764h, 2744h, 273Ah, 272Ch, 27EBh, 0000h
-    dw 2879h, 2859h, 2840h, 282Eh, 0000h, 0000h
-    dw 295Eh, 0000h, 0000h, 0000h, 0000h, 292Eh
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 2C81h, 2C9Ah, 2C23h, 011Bh, 0000h, 0000h
-    dw 2D94h, 2D99h, 2D24h, 0F09h, 0000h, 2DEFh
-    dw 2E84h, 2E8Eh, 2E7Ch, 5200h, 0000h, 0000h
-    dw 2F70h, 2F50h, 2F7Eh, 1C0Dh, 2FE3h, 0000h
-    dw 307Ah, 305Ah, 3060h, 0000h, 0000h, 0000h
-    dw 3162h, 3142h, 312Bh, 313Ah, 0000h, 0000h
-    dw 326Dh, 324Dh, 3225h, 4F31h, 32E6h, 0000h
-    dw 332Ch, 332Dh, 3322h, 5032h, 0000h, 0000h
-    dw 342Eh, 0000h, 3427h, 5133h, 0000h, 0000h
-    dw 356Ah, 354Ah, 353Bh, 353Bh, 0000h, 35E9h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 3920h, 3920h, 3920h, 5230h, 39FFh, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 453Dh, 0000h, 45F7h, 45F0h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 4700h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 4800h, 48EFh, 0000h
-    dw 0000h, 0000h, 0000h, 4900h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 4B00h, 0000h, 0000h
-    dw 0000h, 0000h, 4C3Ah, 4C00h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 4D00h, 0000h, 0000h
-    dw 0000h, 0000h, 4EF1h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 4F00h, 4FF3h, 0000h
-    dw 0000h, 0000h, 0000h, 5000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 5100h, 51F2h, 0000h
-    dw 0000h, 0000h, 5225h, 5200h, 0000h, 0000h
-    dw 0000h, 0000h, 532Ch, 5300h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
-; Keypad slash is E0 35, the same scan as the J key.
+    db 00h, 00h, 00h, 00h, 00h  ; 00
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 01
+    dw 0000h
+    db 31h, 0F8h, 00h, 00h, 0AAh  ; 02
+    dw 02A6h
+    db 32h, 15h, 0FDh, 00h, 00h  ; 03
+    dw 03A7h
+    db 33h, 00h, 00h, 00h, 00h  ; 04
+    dw 0000h
+    db 34h, 0AFh, 00h, 00h, 00h  ; 05
+    dw 0000h
+    db 35h, 0AEh, 00h, 00h, 00h  ; 06
+    dw 06FAh
+    db 36h, 24h, 9Bh, 00h, 00h  ; 07
+    dw 079Ch
+    db 37h, 00h, 9Dh, 00h, 00h  ; 08
+    dw 0000h
+    db 38h, 00h, 00h, 00h, 0ECh  ; 09
+    dw 0F09h
+    db 39h, 00h, 00h, 00h, 00h  ; 0A
+    dw 0A2Fh
+    db 30h, 00h, 00h, 00h, 00h  ; 0B
+    dw 0B2Ah
+    db 2Dh, 2Dh, 00h, 00h, 00h  ; 0C
+    dw 4A2Dh
+    db 60h, 00h, 00h, 00h, 00h  ; 0D
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 0E
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 0F
+    dw 0000h
+    db 78h, 58h, 00h, 00h, 00h  ; 10
+    dw 4900h
+    db 76h, 56h, 5Fh, 00h, 0FBh  ; 11
+    dw 0E08h
+    db 6Ch, 4Ch, 5Bh, 00h, 00h  ; 12
+    dw 4800h
+    db 63h, 43h, 5Dh, 00h, 00h  ; 13
+    dw 5300h
+    db 77h, 57h, 5Eh, 00h, 0EAh  ; 14
+    dw 5100h
+    db 6Bh, 4Bh, 21h, 00h, 00h  ; 15
+    dw 15ADh
+    db 68h, 48h, 3Ch, 00h, 00h  ; 16
+    dw 4737h
+    db 67h, 47h, 3Eh, 00h, 0E2h  ; 17
+    dw 4838h
+    db 66h, 46h, 3Dh, 0EDh, 0E8h  ; 18
+    dw 4939h
+    db 71h, 51h, 26h, 00h, 00h  ; 19
+    dw 4E2Bh
+    db 0E1h, 00h, 00h, 00h, 00h  ; 1A
+    dw 4A2Dh
+    db 27h, 00h, 2Fh, 00h, 00h  ; 1B
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 1C
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 1D
+    dw 0000h
+    db 75h, 55h, 5Ch, 00h, 00h  ; 1E
+    dw 4700h
+    db 69h, 49h, 2Fh, 00h, 00h  ; 1F
+    dw 4B00h
+    db 61h, 41h, 7Bh, 0E0h, 00h  ; 20
+    dw 5000h
+    db 65h, 45h, 7Dh, 0EEh, 00h  ; 21
+    dw 4D00h
+    db 6Fh, 4Fh, 2Ah, 00h, 00h  ; 22
+    dw 4F00h
+    db 73h, 53h, 3Fh, 0E5h, 0E4h  ; 23
+    dw 23A8h
+    db 6Eh, 4Eh, 28h, 00h, 00h  ; 24
+    dw 4B34h
+    db 72h, 52h, 29h, 00h, 00h  ; 25
+    dw 4C35h
+    db 74h, 54h, 2Dh, 0E7h, 00h  ; 26
+    dw 4D36h
+    db 64h, 44h, 3Ah, 0EBh, 00h  ; 27
+    dw 272Ch
+    db 79h, 59h, 40h, 00h, 00h  ; 28
+    dw 282Eh
+    db 5Eh, 00h, 00h, 00h, 2Eh  ; 29
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 2A
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 2B
+    dw 0000h
+    db 81h, 9Ah, 23h, 00h, 00h  ; 2C
+    dw 011Bh
+    db 94h, 99h, 24h, 00h, 0EFh  ; 2D
+    dw 0F09h
+    db 84h, 8Eh, 7Ch, 00h, 00h  ; 2E
+    dw 5200h
+    db 70h, 50h, 7Eh, 0E3h, 00h  ; 2F
+    dw 1C0Dh
+    db 7Ah, 5Ah, 60h, 00h, 00h  ; 30
+    dw 0000h
+    db 62h, 42h, 2Bh, 00h, 00h  ; 31
+    dw 313Ah
+    db 6Dh, 4Dh, 25h, 0E6h, 00h  ; 32
+    dw 4F31h
+    db 2Ch, 2Dh, 22h, 00h, 00h  ; 33
+    dw 5032h
+    db 2Eh, 00h, 27h, 00h, 00h  ; 34
+    dw 5133h
+    db 6Ah, 4Ah, 3Bh, 00h, 0E9h  ; 35
+    dw 353Bh
+    db 00h, 00h, 00h, 00h, 00h  ; 36
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 37
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 38
+    dw 0000h
+    db 20h, 20h, 20h, 0FFh, 00h  ; 39
+    dw 5230h
+    db 00h, 00h, 00h, 00h, 00h  ; 3A
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 3B
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 3C
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 3D
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 3E
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 3F
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 40
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 41
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 42
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 43
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 44
+    dw 0000h
+    db 00h, 00h, 3Dh, 0F7h, 0F0h  ; 45
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 46
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 47
+    dw 4700h
+    db 00h, 00h, 00h, 0EFh, 00h  ; 48
+    dw 4800h
+    db 00h, 00h, 00h, 00h, 00h  ; 49
+    dw 4900h
+    db 00h, 00h, 00h, 00h, 00h  ; 4A
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 4B
+    dw 4B00h
+    db 00h, 00h, 3Ah, 00h, 00h  ; 4C
+    dw 4C00h
+    db 00h, 00h, 00h, 00h, 00h  ; 4D
+    dw 4D00h
+    db 00h, 00h, 0F1h, 00h, 00h  ; 4E
+    dw 0000h
+    db 00h, 00h, 00h, 0F3h, 00h  ; 4F
+    dw 4F00h
+    db 00h, 00h, 00h, 00h, 00h  ; 50
+    dw 5000h
+    db 00h, 00h, 00h, 0F2h, 00h  ; 51
+    dw 5100h
+    db 00h, 00h, 25h, 00h, 00h  ; 52
+    dw 5200h
+    db 00h, 00h, 2Ch, 00h, 00h  ; 53
+    dw 5300h
+    db 00h, 00h, 00h, 00h, 00h  ; 54
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 55
+    dw 0000h
+    db 00h, 00h, 00h, 00h, 00h  ; 56
+    dw 0000h
+; Keypad slash arrives as E0 35h, and 35h is also the J key. This row
+; has the same seven-byte shape, so the lookup below serves both.
 kpslash:
-    dw 0000h, 0000h, 35F6h, 0000h, 0000h, 0000h
-; AL = scan byte, which may be a break or a prefix.
-; seen_e0 is 1 when 0040:0096 says the previous byte was E0.
-; Carry set: the caller gives this byte to the BIOS.
-; Carry clear: the caller drops it. nout is 0, 1, or 2 and the words
-; are the typeahead entries.
+    db 00h, 00h, 0F6h, 00h, 00h
+    dw 0000h
+; One scan byte enters here. AL may be a make or a break. BL is the
+; scan with the break bit removed, and BH is that break bit alone.
+; seen_e0 is 1 when the 102-key path saw an E0 prefix on this byte.
+; Carry set tells the caller to give the byte to the BIOS. Carry clear
+; tells the caller to drop it. nout is then 0, 1, or 2, and nword0 and
+; nword1 are the typeahead words.
 neo_handle proc near
     mov bl, al
     and bl, 7Fh
@@ -269,6 +420,9 @@ neo_handle proc near
     mov byte ptr cs:nout, 0
     mov word ptr cs:nword0, 0
     mov word ptr cs:nword1, 0
+; E0 2Ah is the fake left shift around a Num Lock arrow, and it is not
+; treated as Shift. Every other byte is offered to try_mod. A modifier
+; this driver owns is eaten, break as well as make.
     cmp byte ptr cs:seen_e0, 0
     je nh_mods
     cmp bl, 2Ah
@@ -279,10 +433,20 @@ nh_mods:
     or dl, dl
     jz nh_notmod
     jmp nh_eat
+; Suspend gives character keys back to the BIOS. Mod3 and Mod4 were
+; already eaten, so a suspended driver does not release those keys.
 nh_notmod:
     cmp byte ptr cs:paused, 0
     je nh_run
     jmp nh_pass
+; A Shift make toggles capitals when that Shift's bit is already set in
+; 0040:0017 and the other Shift bit is clear. The first make still has
+; a clear bit, so it is passed through and the BIOS records it. A later
+; make of the same key, which is what the keyboard sends while the key
+; is held, finds the bit set and toggles. If both Shift bits are already
+; set, the make is passed through and capitals stay as they are. Bit 0
+; is right Shift and bit 1 is left Shift. caps and BIOS bit 6 are
+; inverted together. The Shift scan is then passed through.
 nh_run:
     cmp bl, 2Ah
     je nh_shift
@@ -311,6 +475,10 @@ nh_shright:
     test al, 01h
     jnz nh_tog
     jmp nh_pass
+; The main typing block is owned on make and on break. The break of an
+; owned key is eaten and produces nothing. E0 35h is the keypad slash
+; rather than J, and the keypad scans are owned only while Mod3 or Mod4
+; is down. With neither Mod key down, those scans go to the BIOS.
 nh_own:
     cmp byte ptr cs:seen_e0, 0
     je nh_ownb
@@ -333,6 +501,11 @@ nh_tog:
     xor byte ptr cs:caps, 1
     xor byte ptr es:[17h], 40h
     jmp nh_pass
+; Choose the layer. Mod3 and Mod4 together are layer 6, ahead of either
+; key alone. Mod4 alone is layer 4. Mod3 with a Shift bit set is layer
+; 5, and that is its own layer: the capital xor is not applied on top.
+; Mod3 alone is layer 3. The Shift bits are copied to CH. load_layer
+; has to preserve CX, because the letter path tests CH after it returns.
 nh_char:
     mov ch, es:[17h]
     mov al, cs:mod4a
@@ -360,6 +533,19 @@ nh_only3:
 nh_m3:
     mov dh, 3
     jmp nh_pick
+; Neither Mod key is down. Ctrl and Alt together are passed through, so
+; Ctrl+Alt+Del still reaches the BIOS on the 102-key map. Alt alone
+; writes a zero character with the physical scan in the high byte, the
+; same shape the BIOS uses for an Alt combination. Ctrl on a layer-1
+; letter writes the control character of that Neo letter. Ctrl on any
+; other cell is eaten. This block is not used while Mod3 is down, so
+; Mod3 wins over Ctrl.
+;
+; With neither Ctrl nor Alt, layer 1 is loaded and the character is
+; classified. A letter then uses layer 2 when caps xor the Shift bits is
+; 1. A non-letter uses layer 2 when a Shift bit is set, with no capital
+; xor. A letter is a-z, or one of the four layer-1 German bytes: ue
+; (81h), ae (84h), oe (94h), and sz (E1h).
 nh_nomod:
     test ch, 04h
     jz nh_noctl
@@ -393,6 +579,11 @@ nh_ns:
     jmp nh_pick
 nh_low:
     mov dh, 1
+; Shift on sz has no single capital in this font, so it writes S and
+; then S, both under the sz scan. Every other cell is loaded once. An
+; empty cell writes nothing and does not fall back to another layer.
+; The Insert word 5200h also toggles bit 7 of 0040:0017. Delete is
+; 5300h and changes no flag.
 nh_pick:
     cmp bl, 1Ah
     jne nh_one
@@ -440,7 +631,15 @@ nh_leave:
     ret
 neo_handle endp
 
-; DL = 1 when this byte is a modifier this driver owns.
+; Decide whether BL is a modifier this driver owns. DL is 1 when it is.
+; On the 102-key map, Mod3 is Caps Lock (3Ah) and the # key (2Bh).
+; Mod4 is the < key (56h) and AltGr (E0 38h). On the 83-key map, Mod3
+; is the key left of A (1Dh) and the # key (2Bh). Mod4 is Alt (38h).
+; The wide key right of the space bar (3Ah) is not passed to the BIOS.
+; Its make sets the Ctrl bits, 0040:0017 bit 2 and 0040:0018 bit 0, and
+; its break clears them. A make that finds the key already down returns
+; without toggling suspend or capitals. Suspend flips only on the make
+; that finds the other Mod3 key already down.
 try_mod proc near
     xor dl, dl
     cmp byte ptr cs:fingers, 0
@@ -542,7 +741,10 @@ tm_ret:
     ret
 try_mod endp
 
-; Carry set when BL is a key on the main typing block.
+; Carry set when BL is on the main typing block: the space bar, the key
+; left of 1, the number row through the acute key, the three letter
+; rows. The keypad, the function keys, and both Shift keys are outside
+; these ranges.
 owned_p proc near
     cmp bl, 39h
     je ow_y
@@ -572,8 +774,18 @@ ow_y:
     ret
 owned_p endp
 
-; BL = scan, DH = layer 1..6. Returns the typeahead word in AX.
-; E0 35 is the keypad slash, not the J key.
+; BL is the scan and DH is the layer, 1 through 6. AX comes back as the
+; typeahead word, or zero when the cell is empty. E0 35h reads kpslash
+; instead of the J row.
+;
+; A row is seven bytes, so the row address is laytab + scan*7. The
+; multiply is three shifts and a subtract, which is all an 8086 can do
+; with this factor. CX is saved around it. The caller keeps the Shift
+; flags in CH and reads them after this returns. Layers 1, 2, and 3
+; are bytes 0, 1, and 2. Layers 5 and 6 are bytes 3 and 4. A nonzero
+; byte is returned with BL in the high half. Layer 4 is the word at
+; byte 5 of the row. On an odd row that word is not aligned. An 8086
+; reads it anyway.
 load_layer proc near
     cmp byte ptr cs:seen_e0, 0
     je ll_main
@@ -591,27 +803,39 @@ ll_main:
     shl ax, 1
     shl ax, 1
     shl ax, 1
-    shl cx, 1
-    shl cx, 1
-    add ax, cx
+    sub ax, cx
     pop cx
     mov si, OFFSET laytab
     add si, ax
 ll_idx:
+    cmp dh, 4
+    je ll_w4
     mov al, dh
     dec al
+    cmp dh, 4
+    jb ll_add
+    dec al
+ll_add:
     xor ah, ah
-    shl ax, 1
     add si, ax
-    mov ax, cs:[si]
+    mov al, cs:[si]
+    or al, al
+    jz ll_z
+    mov ah, bl
+    ret
+ll_w4:
+    mov ax, cs:[si+5]
     ret
 ll_z:
     xor ax, ax
     ret
 load_layer endp
 
-; Carry set when a keypad key should follow the Neo layer.
-; Plain keypad keys stay with the BIOS.
+; Carry set when this keypad scan should follow the Neo layer. With
+; neither Mod3 nor Mod4 down, the keypad stays with the BIOS. The
+; claimed scans are * (37h), Num Lock (45h), 7 through Del (47h through
+; 53h), and keypad slash (E0 35h). The gray arrow keys are E0 plus an
+; arrow scan. They fail the E0 test here, so they stay arrows.
 kp_layer proc near
     mov al, cs:mod3a
     or al, cs:mod3b
@@ -639,7 +863,8 @@ kp_no:
     ret
 kp_layer endp
 
-; Carry set for a-z and the four German letters on layer 1.
+; Carry set when AL is a letter for the capital rule: a through z, or
+; ue, ae, oe, or sz on layer 1.
 is_letter proc near
     cmp al, 'a'
     jb il_g
@@ -663,6 +888,9 @@ il_y:
     ret
 is_letter endp
 
+; Write the one or two words neo_handle prepared. A full typeahead
+; buffer drops the word. The caller has already decided to eat the scan
+; byte, so the key is not handed back when the buffer cannot take it.
 flush_words proc near
     cmp byte ptr cs:nout, 0
     je fw_ret
@@ -676,9 +904,22 @@ fw_ret:
     ret
 flush_words endp
 
-; Store AX in the BIOS typeahead. Carry set if the buffer is full.
-; The caller's interrupt flag is restored. BP holds the full/empty
-; result across that restore.
+; Store AX in the BIOS typeahead. Carry set means the buffer was full
+; and the word was not stored. The buffer is a ring of words, low byte
+; character and high byte scan. Its start and end are 0040:0080 and
+; 0040:0082 on a machine that has relocated it. Those two words are
+; trusted only when the start is at least 001Eh, the end is above the
+; start and at most 00A0h, and both are even. Otherwise the buffer is
+; the original 001Eh through 003Eh. The head is 0040:001A and the tail
+; is 0040:001C. The next tail is where the word is written. If that
+; next tail would meet the head, the buffer is full.
+;
+; Interrupts are off for the update and are then restored to whatever
+; state the caller had. POPF restores that state, and a later POP does
+; not change the flags, so the full-or-empty result is held in BP and
+; tested after BP itself is popped. This routine does not enable
+; interrupts on its own. The keyboard interrupt is already running with
+; them off, and it should stay that way until the BIOS is finished.
 neo_put proc near
     push bp
     push ds
@@ -739,9 +980,20 @@ put_stc:
     ret
 neo_put endp
 
+; Stack for the keyboard interrupt and for the INT 21h that ends
+; installation. The installer points SS:SP at resident_end only after
+; the banner has been printed and the open handles have been closed.
     dw 64 dup (0)
 resident_end:
 
+; From here on, nothing stays resident.
+;
+; /H prints the command list. /T runs the self-test and returns the
+; fail count as the DOS error level. /U removes a resident copy. A
+; plain NEO, when a copy is already resident, prints the counters.
+; /XT forces the 83-key finger map and /AT forces the 102-key map.
+; Neither switch chooses the interrupt. The model byte does that for
+; the fingers, and the BIOS feature byte does that for the hook.
 init:
     call parse_cmd
     cmp byte ptr want_h, 0
@@ -776,6 +1028,17 @@ init_busy:
     call show_status
     mov ax, 4C01h
     int 21h
+; Model bytes FF, FE, FD, and FB are the 83-key finger map. Every other
+; model byte is the 102-key map. Feature bit 4 of the table returned by
+; INT 15h AH=C0h means the BIOS calls AH=4Fh. detect leaves BX alone
+; across that call, because the table pointer comes back in ES:BX.
+;
+; The saved vector is read with AH=35h and written with AH=25h. Handles
+; 0 through 19 are closed after the banner. AH=31h would otherwise keep
+; a redirected standard output open, and the next write would continue
+; at the end of the banner. The stack moves to resident_end, and DX
+; becomes the resident size in paragraphs. The PSP is inside that size,
+; because a COM's CS is the PSP and resident_end is an offset from CS.
 init_install:
     call detect
     cmp byte ptr force, 1
@@ -840,7 +1103,8 @@ inst_close:
     mov ax, 3100h
     int 21h
 
-; --- transient -------------------------------------------------------------
+; Transient state and the commands. None of this is addressable once
+; the driver has stayed resident.
 
 want_u  db 0
 envseg  dw 0
@@ -924,7 +1188,9 @@ pc_done:
     ret
 parse_cmd endp
 
-; ES:BX = hooked entry, carry clear, when a resident copy is found.
+; Look for a resident copy on INT 15h first, then on INT 09h. Carry
+; clear means ES:BX is the hooked entry. The signature is the four
+; bytes at ES:BX-6. The state offset is the word at ES:BX-2.
 find_res proc near
     mov ax, 3515h
     int 21h
@@ -987,6 +1253,11 @@ det_done:
     ret
 detect endp
 
+; Put the saved vector back, free the resident PSP, and free its
+; environment if the word at PSP:2Ch is not zero. The message is printed
+; with DS equal to this transient segment. The vector write uses the
+; BIOS segment in DS, and a message printed before DS is restored would
+; dump that segment instead of the text.
 unload proc near
     mov si, es:[bx-2]
     mov ax, es:[2Ch]
@@ -1119,6 +1390,11 @@ ban_rest:
     ret
 say_banner endp
 
+; The self-test calls neo_handle directly. It does not generate
+; interrupts and it does not require the driver to be resident. Each
+; case plants the BIOS flags and the modifier state, passes one scan
+; byte, and compares the carry flag, the words, and the flags that
+; should remain. The BIOS keyboard flags are restored afterwards.
 self_test proc near
     call detect
     mov dx, OFFSET t_model
@@ -1175,7 +1451,11 @@ st_ok:
     ret
 self_test endp
 
-; SI = case record. ES = 40h.
+; SI points at one case. The 23-byte header is the scan, the value to
+; plant at 0040:0017, the six modifier and mode bytes, the E0 flag, the
+; expected carry, the expected word count, the two expected words, and
+; the seven bytes of state expected afterwards. An ASCIZ name follows.
+; ES is the BIOS data segment.
 one_case proc near
     push si
     mov al, [si+1]
@@ -1267,6 +1547,8 @@ oc_end:
     ret
 one_case endp
 
+; neo_put is checked against the live BIOS buffer: one known word is
+; written, the tail slot is compared, and the previous tail is restored.
 buf_case proc near
     mov ax, 40h
     mov es, ax
@@ -1305,6 +1587,8 @@ bc_bad:
     ret
 buf_case endp
 
+; On the 83-key map, scan 3Ah must set the two Ctrl bits, and the break
+; BAh must clear them. The scan is eaten in both cases.
 xt_ctrl_case proc near
     mov byte ptr es:[17h], 0
     mov byte ptr es:[18h], 0
@@ -1414,10 +1698,10 @@ ban9 db 'Hooked INT 09h. The BIOS still handles every other key.', 13, 10, '$'
 ban2 db 'Both Shift keys: capitals. Both Mod3 keys: suspend.', 13, 10
     db 'NEO /U removes it. Run NEO again to see the counters.', 13, 10, '$'
 
-; Case header, 23 bytes, then an ASCIZ name:
-; scan f17 m3a m3b m4a m4b caps paused fingers e0 pass nout
-; dw w0, w1
-; exp17 expcaps expm3a expm3b expm4a expm4b exppaused
+; One case is 23 header bytes and then an ASCIZ name. neo_handle is
+; called with the scan in AL and the planted state around it. The
+; expected words are the typeahead values, low byte character and high
+; byte scan.
 TCASE MACRO sc, f17, m3a, m3b, m4a, m4b, cap, pau, fing, e0, pass, nout, w0, w1, e17, ecap, em3a, em3b, em4a, em4b, epau, nam
     db sc, f17, m3a, m3b, m4a, m4b, cap, pau, fing, e0, pass, nout
     dw w0, w1
