@@ -259,7 +259,11 @@ modelb  db 0                    ; +23  byte read from F000:FFFE
 ; is its scan code.
 ;
 ; A dw stores the scan in the high byte and the character in the low
-; byte, so dw 02A6h is scan 02h and CP437 A6h. Bytes that are not ASCII:
+; byte, so dw 02A6h is scan 02h and CP437 A6h. A printable ASCII byte is
+; written as that character. A layer 4 word whose character is printable
+; ASCII is the scan in the high byte plus that character, so 4A00h + '-'
+; is scan 4Ah and '-'. The apostrophe stays 27h. A quoted dollar sign is
+; the character, not the end of a DOS string. Bytes that are not ASCII:
 ; 81 ue, 84 ae, 8E AE, 94 oe, 99 OE, 9A UE, E1 sz, F8 degree, 15
 ; section, FD superscript 2, A6 feminine ordinal, A7 masculine ordinal,
 ; AF >>, AE <<, FA middle dot, 9B cent, 9C pound, 9D yen, AD inverted
@@ -276,118 +280,118 @@ laytab:
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 01
     dw 0000h
-    db 31h, 0F8h, 00h, 00h, 0AAh  ; 02
+    db '1', 0F8h, 00h, 00h, 0AAh  ; 02
     dw 02A6h
-    db 32h, 15h, 0FDh, 00h, 00h  ; 03
+    db '2', 15h, 0FDh, 00h, 00h  ; 03
     dw 03A7h
-    db 33h, 00h, 00h, 00h, 00h  ; 04
+    db '3', 00h, 00h, 00h, 00h  ; 04
     dw 0000h
-    db 34h, 0AFh, 00h, 00h, 00h  ; 05
+    db '4', 0AFh, 00h, 00h, 00h  ; 05
     dw 0000h
-    db 35h, 0AEh, 00h, 00h, 00h  ; 06
+    db '5', 0AEh, 00h, 00h, 00h  ; 06
     dw 06FAh
-    db 36h, 24h, 9Bh, 00h, 00h  ; 07
+    db '6', '$', 9Bh, 00h, 00h  ; 07
     dw 079Ch
-    db 37h, 00h, 9Dh, 00h, 00h  ; 08
+    db '7', 00h, 9Dh, 00h, 00h  ; 08
     dw 0000h
-    db 38h, 00h, 00h, 00h, 0ECh  ; 09
+    db '8', 00h, 00h, 00h, 0ECh  ; 09
     dw 0F09h
-    db 39h, 00h, 00h, 00h, 00h  ; 0A
-    dw 0A2Fh
-    db 30h, 00h, 00h, 00h, 00h  ; 0B
-    dw 0B2Ah
-    db 2Dh, 2Dh, 00h, 00h, 00h  ; 0C
-    dw 4A2Dh
-    db 60h, 00h, 00h, 00h, 00h  ; 0D
+    db '9', 00h, 00h, 00h, 00h  ; 0A
+    dw 0A00h + '/'
+    db '0', 00h, 00h, 00h, 00h  ; 0B
+    dw 0B00h + '*'
+    db '-', '-', 00h, 00h, 00h  ; 0C
+    dw 4A00h + '-'
+    db '`', 00h, 00h, 00h, 00h  ; 0D
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 0E
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 0F
     dw 0000h
-    db 78h, 58h, 00h, 00h, 00h  ; 10
+    db 'x', 'X', 00h, 00h, 00h  ; 10
     dw 4900h
-    db 76h, 56h, 5Fh, 00h, 0FBh  ; 11
+    db 'v', 'V', '_', 00h, 0FBh  ; 11
     dw 0E08h
-    db 6Ch, 4Ch, 5Bh, 00h, 00h  ; 12
+    db 'l', 'L', '[', 00h, 00h  ; 12
     dw 4800h
-    db 63h, 43h, 5Dh, 00h, 00h  ; 13
+    db 'c', 'C', ']', 00h, 00h  ; 13
     dw 5300h
-    db 77h, 57h, 5Eh, 00h, 0EAh  ; 14
+    db 'w', 'W', '^', 00h, 0EAh  ; 14
     dw 5100h
-    db 6Bh, 4Bh, 21h, 00h, 00h  ; 15
+    db 'k', 'K', '!', 00h, 00h  ; 15
     dw 15ADh
-    db 68h, 48h, 3Ch, 00h, 00h  ; 16
-    dw 4737h
-    db 67h, 47h, 3Eh, 00h, 0E2h  ; 17
-    dw 4838h
-    db 66h, 46h, 3Dh, 0EDh, 0E8h  ; 18
-    dw 4939h
-    db 71h, 51h, 26h, 00h, 00h  ; 19
-    dw 4E2Bh
+    db 'h', 'H', '<', 00h, 00h  ; 16
+    dw 4700h + '7'
+    db 'g', 'G', '>', 00h, 0E2h  ; 17
+    dw 4800h + '8'
+    db 'f', 'F', '=', 0EDh, 0E8h  ; 18
+    dw 4900h + '9'
+    db 'q', 'Q', '&', 00h, 00h  ; 19
+    dw 4E00h + '+'
     db 0E1h, 00h, 00h, 00h, 00h  ; 1A
-    dw 4A2Dh
-    db 27h, 00h, 2Fh, 00h, 00h  ; 1B
+    dw 4A00h + '-'
+    db 27h, 00h, '/', 00h, 00h  ; 1B
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 1C
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 1D
     dw 0000h
-    db 75h, 55h, 5Ch, 00h, 00h  ; 1E
+    db 'u', 'U', '\', 00h, 00h  ; 1E
     dw 4700h
-    db 69h, 49h, 2Fh, 00h, 00h  ; 1F
+    db 'i', 'I', '/', 00h, 00h  ; 1F
     dw 4B00h
-    db 61h, 41h, 7Bh, 0E0h, 00h  ; 20
+    db 'a', 'A', '{', 0E0h, 00h  ; 20
     dw 5000h
-    db 65h, 45h, 7Dh, 0EEh, 00h  ; 21
+    db 'e', 'E', '}', 0EEh, 00h  ; 21
     dw 4D00h
-    db 6Fh, 4Fh, 2Ah, 00h, 00h  ; 22
+    db 'o', 'O', '*', 00h, 00h  ; 22
     dw 4F00h
-    db 73h, 53h, 3Fh, 0E5h, 0E4h  ; 23
+    db 's', 'S', '?', 0E5h, 0E4h  ; 23
     dw 23A8h
-    db 6Eh, 4Eh, 28h, 00h, 00h  ; 24
-    dw 4B34h
-    db 72h, 52h, 29h, 00h, 00h  ; 25
-    dw 4C35h
-    db 74h, 54h, 2Dh, 0E7h, 00h  ; 26
-    dw 4D36h
-    db 64h, 44h, 3Ah, 0EBh, 00h  ; 27
-    dw 272Ch
-    db 79h, 59h, 40h, 00h, 00h  ; 28
-    dw 282Eh
-    db 5Eh, 00h, 00h, 00h, 2Eh  ; 29
+    db 'n', 'N', '(', 00h, 00h  ; 24
+    dw 4B00h + '4'
+    db 'r', 'R', ')', 00h, 00h  ; 25
+    dw 4C00h + '5'
+    db 't', 'T', '-', 0E7h, 00h  ; 26
+    dw 4D00h + '6'
+    db 'd', 'D', ':', 0EBh, 00h  ; 27
+    dw 2700h + ','
+    db 'y', 'Y', '@', 00h, 00h  ; 28
+    dw 2800h + '.'
+    db '^', 00h, 00h, 00h, '.'  ; 29
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 2A
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 2B
     dw 0000h
-    db 81h, 9Ah, 23h, 00h, 00h  ; 2C
+    db 81h, 9Ah, '#', 00h, 00h  ; 2C
     dw 011Bh
-    db 94h, 99h, 24h, 00h, 0EFh  ; 2D
+    db 94h, 99h, '$', 00h, 0EFh  ; 2D
     dw 0F09h
-    db 84h, 8Eh, 7Ch, 00h, 00h  ; 2E
+    db 84h, 8Eh, '|', 00h, 00h  ; 2E
     dw 5200h
-    db 70h, 50h, 7Eh, 0E3h, 00h  ; 2F
+    db 'p', 'P', '~', 0E3h, 00h  ; 2F
     dw 1C0Dh
-    db 7Ah, 5Ah, 60h, 00h, 00h  ; 30
+    db 'z', 'Z', '`', 00h, 00h  ; 30
     dw 0000h
-    db 62h, 42h, 2Bh, 00h, 00h  ; 31
-    dw 313Ah
-    db 6Dh, 4Dh, 25h, 0E6h, 00h  ; 32
-    dw 4F31h
-    db 2Ch, 2Dh, 22h, 00h, 00h  ; 33
-    dw 5032h
-    db 2Eh, 00h, 27h, 00h, 00h  ; 34
-    dw 5133h
-    db 6Ah, 4Ah, 3Bh, 00h, 0E9h  ; 35
-    dw 353Bh
+    db 'b', 'B', '+', 00h, 00h  ; 31
+    dw 3100h + ':'
+    db 'm', 'M', '%', 0E6h, 00h  ; 32
+    dw 4F00h + '1'
+    db ',', '-', '"', 00h, 00h  ; 33
+    dw 5000h + '2'
+    db '.', 00h, 27h, 00h, 00h  ; 34
+    dw 5100h + '3'
+    db 'j', 'J', ';', 00h, 0E9h  ; 35
+    dw 3500h + ';'
     db 00h, 00h, 00h, 00h, 00h  ; 36
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 37
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 38
     dw 0000h
-    db 20h, 20h, 20h, 0FFh, 00h  ; 39
-    dw 5230h
+    db ' ', ' ', ' ', 0FFh, 00h  ; 39
+    dw 5200h + '0'
     db 00h, 00h, 00h, 00h, 00h  ; 3A
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 3B
@@ -410,7 +414,7 @@ laytab:
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 44
     dw 0000h
-    db 00h, 00h, 3Dh, 0F7h, 0F0h  ; 45
+    db 00h, 00h, '=', 0F7h, 0F0h  ; 45
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 46
     dw 0000h
@@ -424,7 +428,7 @@ laytab:
     dw 0000h
     db 00h, 00h, 00h, 00h, 00h  ; 4B
     dw 4B00h
-    db 00h, 00h, 3Ah, 00h, 00h  ; 4C
+    db 00h, 00h, ':', 00h, 00h  ; 4C
     dw 4C00h
     db 00h, 00h, 00h, 00h, 00h  ; 4D
     dw 4D00h
@@ -436,9 +440,9 @@ laytab:
     dw 5000h
     db 00h, 00h, 00h, 0F2h, 00h  ; 51
     dw 5100h
-    db 00h, 00h, 25h, 00h, 00h  ; 52
+    db 00h, 00h, '%', 00h, 00h  ; 52
     dw 5200h
-    db 00h, 00h, 2Ch, 00h, 00h  ; 53
+    db 00h, 00h, ',', 00h, 00h  ; 53
     dw 5300h
     db 00h, 00h, 00h, 00h, 00h  ; 54
     dw 0000h
