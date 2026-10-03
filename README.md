@@ -31,6 +31,6 @@ The finger map follows the BIOS model byte. `FF`, `FE`, `FD`, and `FB` are 83-ke
 
 ## Building
 
-The source is 8086 assembly for Turbo Assembler 2.01. Do not enable 186 instructions. `TASM` and `TLINK` must be on the path. `NEO.ASM` and `BUILD.BAT` use CR LF line endings.
+The resident driver is 8086 assembly for Turbo Assembler 2.01. The commands and the self-test are Turbo C 2.01, tiny model, also limited to the 8086. Do not enable 186 instructions. `TASM`, `TLINK`, and `TCC` must be on the path, with the Turbo Assembler directory first so its linker is the one that runs. `NEO.ASM`, `NEOCMD.C`, and `BUILD.BAT` use CR LF line endings.
 
 From the source directory, run `BUILD`. The `NEO.COM` in the repository is a build of this source.

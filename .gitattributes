@@ -1,3 +1,4 @@
 *.ASM text eol=crlf
 *.BAT text eol=crlf
+*.C text eol=crlf
 *.COM binary
