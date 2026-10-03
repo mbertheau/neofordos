@@ -2,7 +2,7 @@
 
 A DOS keyboard driver that makes a PC keyboard type the [Neo 2](https://neo-layout.org/) layout. It covers the characters needed for ASCII, the international characters on a German keyboard, and programming punctuation. Output is code page 437.
 
-It runs on an IBM 5160 and on a 486. The BIOS keyboard handler stays in place.
+It runs on an IBM 5160. It also runs on later PCs, such as a 386, whose BIOS calls INT 15h AH=4Fh. The BIOS keyboard handler stays in place.
 
 ## Keys
 
@@ -10,9 +10,9 @@ On a 102-key keyboard, Mod3 is Caps Lock and the `#` key. Mod4 is the `<` key an
 
 On an 83-key keyboard, Mod3 is the key left of A and the `#` key. Mod4 is Alt. The wide key to the right of the space bar is Ctrl.
 
-Both Shift keys together toggle capitals for letters. Both Mod3 keys together suspend Neo and give character keys back to the BIOS. Shift, the real Ctrl key, left Alt, the function keys, and the keypad stay with the BIOS.
+Both Shift keys together toggle capitals for letters. Both Mod3 keys together suspend Neo and give character keys back to the BIOS. Shift, the real Ctrl key, left Alt, and the function keys stay with the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
 
-Dead keys produce the spacing ASCII character. Shift on `ß` produces `S` then `S`. These are not included: superscripts, the euro sign, typographic quotes, and the Greek and math layers.
+Mod3 with Shift is layer 5. Mod3 with Mod4 is layer 6. Dead keys produce the spacing ASCII character. Shift on `ß` produces `S` then `S`. A character is produced when code page 437 can draw it. The euro sign, typographic quotes, and dashes are not in that font.
 
 Load Neo after `KEYB`, or leave `KEYB` out. If the letters do not move, the active BIOS handler is not calling `INT 15h AH=4Fh`.
 
@@ -29,37 +29,8 @@ Load Neo after `KEYB`, or leave `KEYB` out. If the letters do not move, the acti
 
 The finger map follows the BIOS model byte. `FF`, `FE`, `FD`, and `FB` are 83-key. Every other model byte is 102-key. The hook is chosen separately: a BIOS that calls `INT 15h AH=4Fh` is hooked there, and an older XT BIOS gets a thin `INT 09h` wrapper. `NEO /XT` and `NEO /AT` change only the finger map.
 
-`NEO.COM` in this tree is a build of `NEO.ASM` made with Turbo Assembler 2.01.
-
 ## Building
 
-The source is 8086 assembly. Turbo Assembler 2.01 and its linker are required. Do not enable 186 instructions. The 5160 is an 8088.
+The source is 8086 assembly for Turbo Assembler 2.01. Do not enable 186 instructions. `TASM` and `TLINK` must be on the path. `NEO.ASM` and `BUILD.BAT` use CR LF line endings.
 
-`NEO.ASM` and `BUILD.BAT` use CR LF line endings. Copy both into a directory on the DOS path, or into `C:\SRC` when `C:\TASM` is the Turbo Assembler 2.01 directory:
-
-```
-C:
-CD \SRC
-BUILD
-```
-
-`BUILD.BAT` runs `TASM /ml NEO.ASM`, links a COM file with `TLINK /t`, then runs `NEO /T`. The assembler and linker transcript goes to `BUILD.LOG`. The self-test transcript goes to `NEO.LOG`. A successful log contains `TASM_OK`, `LINK_OK`, and `TEST_OK`. The DOS exit code of the emulator is not the result.
-
-By hand:
-
-```
-C:\TASM\TASM /ml NEO.ASM
-C:\TASM\TLINK /t NEO.OBJ
-NEO /T
-```
-
-On this machine the compilers live under `~/DOS`, mounted as `C:` in DOSBox. `~/DOS/dosbox-run.conf` runs `C:\RUN.BAT` and exits. Point that batch at `BUILD.BAT`, or replace its commands with the three lines above. DOSBox needs `DISPLAY`.
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `NEO.ASM` | Driver source. |
-| `NEO.COM` | Built driver. |
-| `BUILD.BAT` | Assemble, link, and self-test. |
-| `LICENSE` | MIT license. |
+From the source directory, run `BUILD`. The `NEO.COM` in the repository is a build of this source.

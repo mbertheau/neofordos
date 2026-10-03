@@ -1,4 +1,4 @@
-; Neo, layers 1-4, for the IBM 5160 and a 486.
+; Neo, layers 1-6, for the IBM 5160 and later PCs.
 ;
 ; The BIOS keyboard handler stays in place. On a BIOS that calls
 ; INT 15h AH=4Fh, that intercept is the only hook: carry set gives the
@@ -16,6 +16,7 @@
 ;
 ; Characters are code page 437. Dead keys produce the spacing ASCII
 ; character. Shift on the sz key produces S then S.
+; Layers 5 and 6 are used when code page 437 has the character.
 
 .MODEL TINY
 .CODE
@@ -156,95 +157,101 @@ modelb  db 0
 
 ; Four words per scan code, layers 1..4. Scan codes 00h..56h.
 ; A word is the typeahead value: low byte ASCII, high byte scan.
+; Six words per scan code, layers 1..6. Scan codes 00h..56h.
+; A word is the typeahead value: low byte character, high byte scan.
+; An empty word produces nothing. Layers 5 and 6 hold only the
+; characters code page 437 can draw.
 laytab:
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0231h, 02F8h, 0000h, 0000h
-    dw 0332h, 0315h, 0000h, 0000h
-    dw 0433h, 0000h, 0000h, 0000h
-    dw 0534h, 05AFh, 0000h, 0000h
-    dw 0635h, 06AEh, 0000h, 0000h
-    dw 0736h, 0724h, 0000h, 0000h
-    dw 0837h, 0000h, 0000h, 0000h
-    dw 0938h, 0000h, 0000h, 0000h
-    dw 0A39h, 0000h, 0000h, 0000h
-    dw 0B30h, 0000h, 0000h, 0000h
-    dw 0C2Dh, 0C2Dh, 0000h, 4A2Dh
-    dw 0D60h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 1078h, 1058h, 0000h, 4900h
-    dw 1176h, 1156h, 115Fh, 0E08h
-    dw 126Ch, 124Ch, 125Bh, 4800h
-    dw 1363h, 1343h, 135Dh, 5300h
-    dw 1477h, 1457h, 145Eh, 5100h
-    dw 156Bh, 154Bh, 1521h, 0000h
-    dw 1668h, 1648h, 163Ch, 4737h
-    dw 1767h, 1747h, 173Eh, 4838h
-    dw 1866h, 1846h, 183Dh, 4939h
-    dw 1971h, 1951h, 1926h, 4E2Bh
-    dw 1AE1h, 0000h, 0000h, 4A2Dh
-    dw 1B27h, 0000h, 1B2Fh, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 1E75h, 1E55h, 1E5Ch, 4700h
-    dw 1F69h, 1F49h, 1F2Fh, 4B00h
-    dw 2061h, 2041h, 207Bh, 5000h
-    dw 2165h, 2145h, 217Dh, 4D00h
-    dw 226Fh, 224Fh, 222Ah, 4F00h
-    dw 2373h, 2353h, 233Fh, 0000h
-    dw 246Eh, 244Eh, 2428h, 4B34h
-    dw 2572h, 2552h, 2529h, 4C35h
-    dw 2674h, 2654h, 262Dh, 4D36h
-    dw 2764h, 2744h, 273Ah, 272Ch
-    dw 2879h, 2859h, 282Eh, 282Eh
-    dw 295Eh, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 2C81h, 2C9Ah, 2C23h, 011Bh
-    dw 2D94h, 2D99h, 2D24h, 0F09h
-    dw 2E84h, 2E8Eh, 2E7Ch, 5200h
-    dw 2F70h, 2F50h, 2F7Eh, 1C0Dh
-    dw 307Ah, 305Ah, 3060h, 0000h
-    dw 3162h, 3142h, 312Bh, 313Ah
-    dw 326Dh, 324Dh, 3225h, 4F31h
-    dw 332Ch, 332Dh, 3322h, 5032h
-    dw 342Eh, 0000h, 3427h, 5133h
-    dw 356Ah, 354Ah, 353Bh, 353Bh
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 3920h, 3920h, 3920h, 5230h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-    dw 0000h, 0000h, 0000h, 0000h
-
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0231h, 02F8h, 0000h, 02A6h, 0000h, 02AAh
+    dw 0332h, 0315h, 03FDh, 03A7h, 0000h, 0000h
+    dw 0433h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0534h, 05AFh, 0000h, 0000h, 0000h, 0000h
+    dw 0635h, 06AEh, 0000h, 06FAh, 0000h, 0000h
+    dw 0736h, 0724h, 079Bh, 079Ch, 0000h, 0000h
+    dw 0837h, 0000h, 089Dh, 0000h, 0000h, 0000h
+    dw 0938h, 0000h, 0000h, 0F09h, 0000h, 09ECh
+    dw 0A39h, 0000h, 0000h, 0A2Fh, 0000h, 0000h
+    dw 0B30h, 0000h, 0000h, 0B2Ah, 0000h, 0000h
+    dw 0C2Dh, 0C2Dh, 0000h, 4A2Dh, 0000h, 0000h
+    dw 0D60h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 1078h, 1058h, 0000h, 4900h, 0000h, 0000h
+    dw 1176h, 1156h, 115Fh, 0E08h, 0000h, 11FBh
+    dw 126Ch, 124Ch, 125Bh, 4800h, 0000h, 0000h
+    dw 1363h, 1343h, 135Dh, 5300h, 0000h, 0000h
+    dw 1477h, 1457h, 145Eh, 5100h, 0000h, 14EAh
+    dw 156Bh, 154Bh, 1521h, 15ADh, 0000h, 0000h
+    dw 1668h, 1648h, 163Ch, 4737h, 0000h, 0000h
+    dw 1767h, 1747h, 173Eh, 4838h, 0000h, 17E2h
+    dw 1866h, 1846h, 183Dh, 4939h, 18EDh, 18E8h
+    dw 1971h, 1951h, 1926h, 4E2Bh, 0000h, 0000h
+    dw 1AE1h, 0000h, 0000h, 4A2Dh, 0000h, 0000h
+    dw 1B27h, 0000h, 1B2Fh, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 1E75h, 1E55h, 1E5Ch, 4700h, 0000h, 0000h
+    dw 1F69h, 1F49h, 1F2Fh, 4B00h, 0000h, 0000h
+    dw 2061h, 2041h, 207Bh, 5000h, 20E0h, 0000h
+    dw 2165h, 2145h, 217Dh, 4D00h, 21EEh, 0000h
+    dw 226Fh, 224Fh, 222Ah, 4F00h, 0000h, 0000h
+    dw 2373h, 2353h, 233Fh, 23A8h, 23E5h, 23E4h
+    dw 246Eh, 244Eh, 2428h, 4B34h, 0000h, 0000h
+    dw 2572h, 2552h, 2529h, 4C35h, 0000h, 0000h
+    dw 2674h, 2654h, 262Dh, 4D36h, 26E7h, 0000h
+    dw 2764h, 2744h, 273Ah, 272Ch, 27EBh, 0000h
+    dw 2879h, 2859h, 2840h, 282Eh, 0000h, 0000h
+    dw 295Eh, 0000h, 0000h, 0000h, 0000h, 292Eh
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 2C81h, 2C9Ah, 2C23h, 011Bh, 0000h, 0000h
+    dw 2D94h, 2D99h, 2D24h, 0F09h, 0000h, 2DEFh
+    dw 2E84h, 2E8Eh, 2E7Ch, 5200h, 0000h, 0000h
+    dw 2F70h, 2F50h, 2F7Eh, 1C0Dh, 2FE3h, 0000h
+    dw 307Ah, 305Ah, 3060h, 0000h, 0000h, 0000h
+    dw 3162h, 3142h, 312Bh, 313Ah, 0000h, 0000h
+    dw 326Dh, 324Dh, 3225h, 4F31h, 32E6h, 0000h
+    dw 332Ch, 332Dh, 3322h, 5032h, 0000h, 0000h
+    dw 342Eh, 0000h, 3427h, 5133h, 0000h, 0000h
+    dw 356Ah, 354Ah, 353Bh, 353Bh, 0000h, 35E9h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 3920h, 3920h, 3920h, 5230h, 39FFh, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 453Dh, 0000h, 45F7h, 45F0h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 4700h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 4800h, 48EFh, 0000h
+    dw 0000h, 0000h, 0000h, 4900h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 4B00h, 0000h, 0000h
+    dw 0000h, 0000h, 4C3Ah, 4C00h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 4D00h, 0000h, 0000h
+    dw 0000h, 0000h, 4EF1h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 4F00h, 4FF3h, 0000h
+    dw 0000h, 0000h, 0000h, 5000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 5100h, 51F2h, 0000h
+    dw 0000h, 0000h, 5225h, 5200h, 0000h, 0000h
+    dw 0000h, 0000h, 532Ch, 5300h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+    dw 0000h, 0000h, 0000h, 0000h, 0000h, 0000h
+; Keypad slash is E0 35, the same scan as the J key.
+kpslash:
+    dw 0000h, 0000h, 35F6h, 0000h, 0000h, 0000h
 ; AL = scan byte, which may be a break or a prefix.
 ; seen_e0 is 1 when 0040:0096 says the previous byte was E0.
 ; Carry set: the caller gives this byte to the BIOS.
@@ -305,7 +312,17 @@ nh_shright:
     jnz nh_tog
     jmp nh_pass
 nh_own:
+    cmp byte ptr cs:seen_e0, 0
+    je nh_ownb
+    cmp bl, 35h
+    jne nh_ownb
+    call kp_layer
+    jc nh_isown
+    jmp nh_pass
+nh_ownb:
     call owned_p
+    jc nh_isown
+    call kp_layer
     jc nh_isown
     jmp nh_pass
 nh_isown:
@@ -320,16 +337,30 @@ nh_char:
     mov ch, es:[17h]
     mov al, cs:mod4a
     or al, cs:mod4b
-    jz nh_not4
-    mov dh, 4
-    jmp nh_pick
-nh_not4:
+    mov dl, al
     mov al, cs:mod3a
     or al, cs:mod3b
-    jz nh_not3
+    mov cl, al
+    or al, dl
+    jz nh_nomod
+    or cl, cl
+    jz nh_only4
+    or dl, dl
+    jz nh_only3
+    mov dh, 6
+    jmp nh_pick
+nh_only4:
+    mov dh, 4
+    jmp nh_pick
+nh_only3:
+    test ch, 03h
+    jz nh_m3
+    mov dh, 5
+    jmp nh_pick
+nh_m3:
     mov dh, 3
     jmp nh_pick
-nh_not3:
+nh_nomod:
     test ch, 04h
     jz nh_noctl
     test ch, 08h
@@ -541,16 +572,32 @@ ow_y:
     ret
 owned_p endp
 
-; BL = scan, DH = layer 1..4. Returns the typeahead word in AX.
+; BL = scan, DH = layer 1..6. Returns the typeahead word in AX.
+; E0 35 is the keypad slash, not the J key.
 load_layer proc near
+    cmp byte ptr cs:seen_e0, 0
+    je ll_main
+    cmp bl, 35h
+    jne ll_main
+    mov si, OFFSET kpslash
+    jmp ll_idx
+ll_main:
     cmp bl, 56h
     ja ll_z
     mov al, bl
     xor ah, ah
-    mov cl, 3
-    shl ax, cl
+    push cx
+    mov cx, ax
+    shl ax, 1
+    shl ax, 1
+    shl ax, 1
+    shl cx, 1
+    shl cx, 1
+    add ax, cx
+    pop cx
     mov si, OFFSET laytab
     add si, ax
+ll_idx:
     mov al, dh
     dec al
     xor ah, ah
@@ -562,6 +609,35 @@ ll_z:
     xor ax, ax
     ret
 load_layer endp
+
+; Carry set when a keypad key should follow the Neo layer.
+; Plain keypad keys stay with the BIOS.
+kp_layer proc near
+    mov al, cs:mod3a
+    or al, cs:mod3b
+    or al, cs:mod4a
+    or al, cs:mod4b
+    jz kp_no
+    cmp byte ptr cs:seen_e0, 0
+    jne kp_ext
+    cmp bl, 37h
+    je kp_yes
+    cmp bl, 45h
+    je kp_yes
+    cmp bl, 47h
+    jb kp_no
+    cmp bl, 53h
+    ja kp_no
+kp_yes:
+    stc
+    ret
+kp_ext:
+    cmp bl, 35h
+    je kp_yes
+kp_no:
+    clc
+    ret
+kp_layer endp
 
 ; Carry set for a-z and the four German letters on layer 1.
 is_letter proc near
@@ -1394,7 +1470,23 @@ cases:
     TCASE 0A0h, 00h, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0000h, 0000h, 00h, 0, 0, 0, 0, 0, 0, 'letter-break'
     TCASE 0E0h, 00h, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0000h, 0000h, 00h, 0, 0, 0, 0, 0, 0, 'prefix'
     TCASE 27h, 00h, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 272Ch, 0000h, 00h, 0, 0, 0, 1, 0, 0, 'comma'
-    TCASE 28h, 00h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 282Eh, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'dot'
+    TCASE 28h, 00h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2840h, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'at'
+    TCASE 28h, 00h, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 282Eh, 0000h, 00h, 0, 0, 0, 1, 0, 0, 'dot'
+    TCASE 03h, 00h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 03FDh, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'sup2'
+    TCASE 20h, 01h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 20E0h, 0000h, 01h, 0, 1, 0, 0, 0, 0, 'alpha'
+    TCASE 09h, 00h, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 09ECh, 0000h, 00h, 0, 1, 0, 1, 0, 0, 'inf'
+    TCASE 11h, 00h, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 11FBh, 0000h, 00h, 0, 1, 0, 1, 0, 0, 'sqrt'
+    TCASE 4Fh, 01h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4FF3h, 0000h, 01h, 0, 1, 0, 0, 0, 0, 'le'
+    TCASE 51h, 01h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 51F2h, 0000h, 01h, 0, 1, 0, 0, 0, 0, 'ge'
+    TCASE 4Eh, 00h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4EF1h, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'plusminus'
+    TCASE 39h, 01h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 39FFh, 0000h, 01h, 0, 1, 0, 0, 0, 0, 'nbsp'
+    TCASE 02h, 00h, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 02AAh, 0000h, 00h, 0, 1, 0, 1, 0, 0, 'not'
+    TCASE 35h, 00h, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 35F6h, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'divide'
+    TCASE 35h, 00h, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0000h, 0000h, 00h, 0, 0, 0, 0, 0, 0, 'kp-slash'
+    TCASE 47h, 00h, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0000h, 0000h, 00h, 0, 0, 0, 0, 0, 0, 'kp7-bios'
+    TCASE 09h, 00h, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0F09h, 0000h, 00h, 0, 0, 0, 1, 0, 0, 'tab'
+    TCASE 48h, 00h, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 4800h, 0000h, 00h, 0, 0, 0, 1, 0, 0, 'kp-up'
+    TCASE 4Ch, 00h, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 4C00h, 0000h, 00h, 0, 0, 0, 1, 0, 0, 'kp-begin'
     TCASE 1Ah, 00h, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 1A53h, 1A53h, 00h, 1, 0, 0, 0, 0, 0, 'caps-sz'
     TCASE 1Bh, 00h, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1B2Fh, 0000h, 00h, 0, 1, 0, 0, 0, 0, 'slash'
     db 0FFh
