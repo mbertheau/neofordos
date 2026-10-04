@@ -30,11 +30,12 @@
 ; The cost of a key is one pass through the interrupt, with interrupts
 ; left off, as the BIOS entered it. The pass is a chain of comparisons
 ; and a multiply that indexes the layer table. Nothing scans the table,
-; and nothing polls. A letter is looked up twice: once to see whether
-; capitals apply, and once to load the chosen layer. On a machine that
-; uses the 4Fh hook, every other INT 15h call pays for a compare and a
-; far jump back to the BIOS. The resident size is resident_end, rounded
-; up to a paragraph, and that count includes the PSP.
+; and nothing polls. With no Mod key, no Ctrl, and no Alt, the
+; character is loaded once to classify it and again to emit it. Shift
+; on sz skips the second load and writes S, then S. On a machine that
+; uses the 4Fh hook, every other INT 15h call pays for a compare and
+; a far jump back to the BIOS. The resident size is resident_end,
+; rounded up to a paragraph, and that count includes the PSP.
 .MODEL TINY
 .CODE
 ORG 100h
@@ -142,7 +143,7 @@ neo09:
     in al, 60h                      ; peek. Port 61h bit 7 is not pulsed yet
     mov byte ptr cs:seen_e0, 0      ; an 83-key keyboard has no E0 prefix
     call neo_handle
-    jc n09_pass                     ; BIOS must still see this byte in the 8042
+    jc n09_pass                     ; the 8255 still holds the byte because port 60h does not clear it
     inc word ptr cs:kept
     in al, 61h                      ; keyboard control. Other bits stay
     mov ah, al                      ; AH = original port 61h value
@@ -183,9 +184,12 @@ n09_pass:
 ; mod3a and mod3b are the two Mod3 keys. mod4a and mod4b are the two
 ; Mod4 keys. A held key repeats, and a repeat must not toggle capitals
 ; or suspend, so each flag stays 1 while its key is down. caps is this
-; driver's capital state. BIOS bit 6 of 0040:0017 matches it, and the
-; Caps Lock scan is never passed through, so the BIOS does not fight
-; that bit. suspended flips when both Mod3 keys go down together.
+; driver's capital state. The byte at 0040:0017 holds the BIOS keyboard
+; flags. Bit 0 is right Shift, bit 1 is left Shift, bit 2 is Ctrl,
+; bit 3 is Alt, bit 6 is Caps Lock, and bit 7 is Insert. Bit 6 matches
+; caps. The Caps Lock scan is never passed through, so the BIOS does
+; not fight that bit.
+; suspended flips when both Mod3 keys go down together.
 ; npending is 0, 1, or 2. pending0 and pending1 are the typeahead words
 ; not yet written. scans counts scan bytes that entered the hook. kept
 ; counts the bytes this driver kept. saved_vec is the BIOS vector that

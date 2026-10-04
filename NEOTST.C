@@ -52,6 +52,14 @@ struct keycase {
     char *name;
 };
 
+/* Initializer columns, in order. The rows are positional.
+   scan is the scan byte. flags17 is the byte at 0040:0017 before the
+   call. Bit 0 is right Shift, bit 1 is left Shift, bit 2 is Ctrl,
+   bit 3 is Alt, bit 6 is Caps Lock, and bit 7 is Insert. Then mod3a,
+   mod3b, mod4a, mod4b, caps, suspended, key83, seen_e0. pass is 1 when
+   the BIOS keeps the scan. Then npending, pending0, pending1,
+   exp_flags17, exp_caps, exp_mod3a, exp_mod3b, exp_mod4a, exp_mod4b,
+   exp_suspended, name. */
 static struct keycase cases[NCASE] = {
     { 0x20, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x2061, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "a\r\n$" },
     { 0x20, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x2041, 0x0000, 0x01, 0, 0, 0, 0, 0, 0, "A\r\n$" },

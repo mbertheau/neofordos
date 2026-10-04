@@ -4,6 +4,35 @@ A DOS keyboard driver that makes a PC keyboard type the [Neo 2](https://neo-layo
 
 It runs on an IBM 5160. It also runs on later PCs, such as a 386, whose BIOS calls INT 15h AH=4Fh. The BIOS keyboard handler stays in place.
 
+## A keystroke
+
+A scan byte names the physical key position, not the letter printed on the key. Scan 20h is the key a German keyboard labels A. Bit 7 clear means the key went down. Bit 7 set means the key went up. The press of this key is the byte 20h. The release is the byte A0h.
+
+DOS reads keystrokes from a ring of words in the BIOS data area. The low byte is the character. The high byte is the scan code. Neo keeps the press of scan 20h and writes the word 2061h. That word is scan 20h and the character a.
+
+A BIOS that calls INT 15h with AH=4Fh has already read the keyboard. Neo sees the scan byte in register AL. Carry set means the BIOS keeps the byte. Carry clear means the BIOS discards it.
+
+An older BIOS has no such call. Neo wraps INT 09h, the keyboard interrupt. It reads port 60h. When Neo keeps the key, it pulses bit 7 of port 61h. That pulse acknowledges the key. Neo then writes 20h to port 20h so the next key can interrupt.
+
+Neo stays resident. It replaces the hooked interrupt vector with its own address, then exits through INT 21h with AH=31h. The keystroke code remains in memory after the command finishes.
+
+For a letter, upper case is caps exclusive-or Shift. For any other character, upper case is Shift alone.
+
+| Modifier | Layer |
+|---|---|
+| No Mod key, lower case | 1 |
+| No Mod key, upper case | 2 |
+| Mod3 alone | 3 |
+| Mod4 alone | 4 |
+| Mod3 with Shift | 5 |
+| Mod3 with Mod4 | 6 |
+
+Layer 5 does not also take capitals. Shift does not change layer 6.
+
+A dead key normally waits for the next character. Neo emits the spacing character at once. The caret and the backtick are those characters.
+
+Alt writes the physical scan in the high byte and 00h in the low byte. Scan 20h with Alt writes 2000h. The shortcut follows the German key position.
+
 ## Keys
 
 On a 102-key keyboard, Mod3 is Caps Lock and the `#` key. Mod4 is the `<` key and AltGr.
@@ -12,7 +41,7 @@ On an 83-key keyboard, Mod3 is the key left of A and the `#` key. Mod4 is Alt. T
 
 Holding one Shift key toggles capitals for letters when the key repeats. Both Mod3 keys together suspend Neo and pass character keys to the BIOS. Shift, the real Ctrl key, left Alt, and the function keys stay with the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
 
-Mod3 with Shift is layer 5. Mod3 with Mod4 is layer 6. Dead keys produce the spacing ASCII character. Shift on `ß` produces `S` then `S`. A character is produced when code page 437 can draw it. The euro sign, typographic quotes, and dashes are not in that font.
+Shift on `ß` produces `S` then `S`. A character is produced when code page 437 can draw it. The euro sign, typographic quotes, and dashes are not in that font.
 
 Load Neo after `KEYB`, or leave `KEYB` out. If the letters do not move, the active BIOS handler is not calling `INT 15h AH=4Fh`.
 
