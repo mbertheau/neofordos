@@ -6,7 +6,7 @@
 
    Turbo C 2.01, tiny model, 8086 only. There is no C runtime. The
    wrappers in NEO.ASM do the DOS and BIOS calls. A string passed to
-   say() ends in $ because INT 21h AH=09h prints until that byte. */
+   print() ends in $ because INT 21h AH=09h prints until that byte. */
 
 #define NCASE 63
 
@@ -16,53 +16,53 @@
 #define ST_MOD4A  3
 #define ST_MOD4B  4
 #define ST_CAPS   5
-#define ST_PAUSED 6
-#define ST_HITS   14
-#define ST_EATEN  16
+#define ST_SUSPENDED 6
+#define ST_SCANS     14
+#define ST_KEPT      16
 
-extern unsigned char fingers, mod3a, mod3b, mod4a, mod4b;
-extern unsigned char caps, paused, seen_e0, nout, modelb;
-extern unsigned nword0, nword1;
+extern unsigned char key83, mod3a, mod3b, mod4a, mod4b;
+extern unsigned char caps, suspended, seen_e0, npending, model_byte;
+extern unsigned pending0, pending1;
 
 void dos_exit(int code);
 void putch(int c);
-void say(char *s);
+void print(char *s);
 unsigned char peekb(unsigned seg, unsigned off);
 void pokeb(unsigned seg, unsigned off, int val);
 unsigned peekw(unsigned seg, unsigned off);
 void pokew(unsigned seg, unsigned off, unsigned val);
-int try_key(int scan);
-int try_put(unsigned word);
-void vec_at(unsigned vec, unsigned *off, unsigned *seg);
-int bios_c0(void);
-void do_unload(unsigned seg, unsigned entry);
-void go_resident(int use15);
+int run_scan(int scan);
+int store_word(unsigned word);
+void read_vector(unsigned vec, unsigned *off, unsigned *seg);
+int has_4f(void);
+void remove_neo(unsigned seg, unsigned entry);
+void go_resident(int bios_4f);
 
 /* One self-test row. pass is 1 when the BIOS should keep the scan.
-   nout is how many typeahead words should be waiting. The words are
+   npending is how many typeahead words should be waiting. The words are
    the character in the low byte and the scan in the high byte. */
 struct keycase {
     unsigned char scan;
-    unsigned char f17;
-    unsigned char m3a;
-    unsigned char m3b;
-    unsigned char m4a;
-    unsigned char m4b;
+    unsigned char flags17;
+    unsigned char mod3a;
+    unsigned char mod3b;
+    unsigned char mod4a;
+    unsigned char mod4b;
     unsigned char caps;
-    unsigned char paused;
-    unsigned char fingers;
-    unsigned char e0;
+    unsigned char suspended;
+    unsigned char key83;
+    unsigned char seen_e0;
     unsigned char pass;
-    unsigned char nout;
-    unsigned w0;
-    unsigned w1;
-    unsigned char e17;
-    unsigned char ecap;
-    unsigned char em3a;
-    unsigned char em3b;
-    unsigned char em4a;
-    unsigned char em4b;
-    unsigned char epau;
+    unsigned char npending;
+    unsigned pending0;
+    unsigned pending1;
+    unsigned char exp_flags17;
+    unsigned char exp_caps;
+    unsigned char exp_mod3a;
+    unsigned char exp_mod3b;
+    unsigned char exp_mod4a;
+    unsigned char exp_mod4b;
+    unsigned char exp_suspended;
     char *name;
 };
 
@@ -80,7 +80,7 @@ static struct keycase cases[NCASE] = {
     { 0x2E, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x2E8E, 0x0000, 0x01, 0, 0, 0, 0, 0, 0, "AE\r\n$" },
     { 0x2C, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x2C81, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "ue\r\n$" },
     { 0x10, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x1078, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "x\r\n$" },
-    { 0x2A, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x0000, 0x0000, 0x42, 1, 0, 0, 0, 0, 0, "caps-chord\r\n$" },
+    { 0x2A, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x0000, 0x0000, 0x42, 1, 0, 0, 0, 0, 0, "shift-repeat\r\n$" },
     { 0x3A, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0000, 0x0000, 0x00, 0, 1, 0, 0, 0, 0, "mod3-down\r\n$" },
     { 0x0BA, 0x00, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0000, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "mod3-up\r\n$" },
     { 0x39, 0x00, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0x5230, 0x0000, 0x00, 0, 0, 0, 1, 0, 0, "kp0\r\n$" },
@@ -105,9 +105,9 @@ static struct keycase cases[NCASE] = {
     { 0x2E, 0x00, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0x2E7C, 0x0000, 0x00, 0, 1, 0, 0, 0, 0, "pipe\r\n$" },
     { 0x2E, 0x00, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0x5200, 0x0000, 0x80, 0, 0, 0, 1, 0, 0, "insert\r\n$" },
     { 0x2B, 0x00, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0000, 0x0000, 0x00, 0, 1, 1, 0, 0, 1, "suspend\r\n$" },
-    { 0x20, 0x00, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0x0000, 0x0000, 0x00, 0, 0, 0, 0, 0, 1, "paused-letter\r\n$" },
+    { 0x20, 0x00, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0x0000, 0x0000, 0x00, 0, 0, 0, 0, 0, 1, "suspended-letter\r\n$" },
     { 0x2A, 0x02, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0x0000, 0x0000, 0x02, 0, 0, 0, 0, 0, 0, "phantom-shift\r\n$" },
-    { 0x2A, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x0000, 0x0000, 0x03, 0, 0, 0, 0, 0, 0, "shift-repeat\r\n$" },
+    { 0x2A, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x0000, 0x0000, 0x03, 0, 0, 0, 0, 0, 0, "both-shifts\r\n$" },
     { 0x0A0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0000, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "letter-break\r\n$" },
     { 0x0E0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x0000, 0x0000, 0x00, 0, 0, 0, 0, 0, 0, "prefix\r\n$" },
     { 0x27, 0x00, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0x272C, 0x0000, 0x00, 0, 0, 0, 1, 0, 0, "comma\r\n$" },
@@ -137,11 +137,11 @@ static char help_txt[] =
     "NEO        install\r\n"
     "NEO /U     remove\r\n"
     "NEO /T     self-test\r\n"
-    "NEO /XT    83-key finger positions\r\n"
-    "NEO /AT    102-key finger positions\r\n"
+    "NEO /XT    83-key positions\r\n"
+    "NEO /AT    102-key positions\r\n"
     "$";
 
-static void putu(n)
+static void print_dec(n)
 unsigned n;
 {
     char digs[5];
@@ -195,16 +195,16 @@ unsigned b;
     putch(hexdig(b));
 }
 
-static void onoff(v)
+static void print_onoff(v)
 unsigned v;
 {
     if (v)
-        say("on$");
+        print("on$");
     else
-        say("off$");
+        print("off$");
 }
 
-/* Model bytes FF, FE, FD, and FB use the 83-key finger positions.
+/* Model bytes FF, FE, FD, and FB use the 83-key positions.
    Every other model byte uses the 102-key positions. The return value
    is 1 when the BIOS calls INT 15h AH=4Fh. */
 static int detect()
@@ -212,11 +212,11 @@ static int detect()
     unsigned char model;
 
     model = peekb(0xF000, 0xFFFE);
-    modelb = model;
-    fingers = 0;
+    model_byte = model;
+    key83 = 0;
     if (model == 0xFF || model == 0xFE || model == 0xFD || model == 0xFB)
-        fingers = 1;
-    return bios_c0();
+        key83 = 1;
+    return has_4f();
 }
 
 static int is_neo(seg, off)
@@ -239,20 +239,20 @@ unsigned off;
 
 /* Look on INT 15h first, then on INT 09h. A hit returns the segment
    and the offset of the hooked entry. */
-static int find_res(segp, entryp)
+static int find_resident(segp, entryp)
 unsigned *segp;
 unsigned *entryp;
 {
     unsigned seg;
     unsigned off;
 
-    vec_at(0x15, &off, &seg);
+    read_vector(0x15, &off, &seg);
     if (is_neo(seg, off)) {
         *segp = seg;
         *entryp = off;
         return 1;
     }
-    vec_at(0x09, &off, &seg);
+    read_vector(0x09, &off, &seg);
     if (is_neo(seg, off)) {
         *segp = seg;
         *entryp = off;
@@ -269,43 +269,43 @@ unsigned entry;
     unsigned mods;
 
     state = peekw(seg, entry - 2);
-    say("Neo is already resident.\r\nCalls $");
-    putu(peekw(seg, state + ST_HITS));
-    say(", kept $");
-    putu(peekw(seg, state + ST_EATEN));
-    say("\r\nCaps $");
-    onoff(peekb(seg, state + ST_CAPS));
-    say("  Pause $");
-    onoff(peekb(seg, state + ST_PAUSED));
-    say("  Mod3 $");
+    print("Neo is already resident.\r\nScans $");
+    print_dec(peekw(seg, state + ST_SCANS));
+    print(", kept $");
+    print_dec(peekw(seg, state + ST_KEPT));
+    print("\r\nCaps $");
+    print_onoff(peekb(seg, state + ST_CAPS));
+    print("  Suspend $");
+    print_onoff(peekb(seg, state + ST_SUSPENDED));
+    print("  Mod3 $");
     mods = peekb(seg, state + ST_MOD3A);
     mods = mods | peekb(seg, state + ST_MOD3B);
-    onoff(mods);
-    say("  Mod4 $");
+    print_onoff(mods);
+    print("  Mod4 $");
     mods = peekb(seg, state + ST_MOD4A);
     mods = mods | peekb(seg, state + ST_MOD4B);
-    onoff(mods);
-    say("\r\nNEO /U removes it.\r\n$");
+    print_onoff(mods);
+    print("\r\nNEO /U removes it.\r\n$");
 }
 
 /* Printed while standard output is still open. go_resident closes
    handles 0 through 19 after this returns. */
-static void announce(has4f)
-int has4f;
+static void announce(bios_4f)
+int bios_4f;
 {
-    say("Neo is resident. Code page 437.\r\n$");
-    if (fingers == 0)
-        say("Mod3: Caps Lock and the # key. Mod4: the < key and AltGr.\r\n$");
+    print("Neo is resident. Code page 437.\r\n$");
+    if (key83 == 0)
+        print("Mod3: Caps Lock and the # key. Mod4: the < key and AltGr.\r\n$");
     else {
-        say("83-key: Mod3 is the key left of A and the # key.\r\n$");
-        say("Mod4 is Alt. Ctrl is the wide key right of the space bar.\r\n$");
+        print("83-key: Mod3 is the key left of A and the # key.\r\n$");
+        print("Mod4 is Alt. Ctrl is the wide key right of the space bar.\r\n$");
     }
-    if (has4f)
-        say("Hooked INT 15h AH=4Fh.\r\n$");
+    if (bios_4f)
+        print("Hooked INT 15h AH=4Fh.\r\n$");
     else
-        say("Hooked INT 09h. The BIOS still handles every other key.\r\n$");
-    say("Both Shift keys: capitals. Both Mod3 keys: suspend.\r\n$");
-    say("NEO /U removes it. Run NEO again to see the counters.\r\n$");
+        print("Hooked INT 09h. The BIOS still handles every other key.\r\n$");
+    print("Shift repeat: capitals. Both Mod3 keys: suspend.\r\n$");
+    print("NEO /U removes it. Run NEO again to see the counters.\r\n$");
 }
 
 static void report(ok, name)
@@ -313,10 +313,10 @@ int ok;
 char *name;
 {
     if (ok)
-        say("OK  $");
+        print("OK  $");
     else
-        say("FAIL $");
-    say(name);
+        print("FAIL $");
+    print(name);
 }
 
 static int one_case(c)
@@ -325,45 +325,45 @@ struct keycase *c;
     int ok;
     int carry;
 
-    pokeb(0x40, 0x17, c->f17);
+    pokeb(0x40, 0x17, c->flags17);
     pokeb(0x40, 0x18, 0);
-    mod3a = c->m3a;
-    mod3b = c->m3b;
-    mod4a = c->m4a;
-    mod4b = c->m4b;
+    mod3a = c->mod3a;
+    mod3b = c->mod3b;
+    mod4a = c->mod4a;
+    mod4b = c->mod4b;
     caps = c->caps;
-    paused = c->paused;
-    fingers = c->fingers;
-    seen_e0 = c->e0;
-    carry = try_key(c->scan);
+    suspended = c->suspended;
+    key83 = c->key83;
+    seen_e0 = c->seen_e0;
+    carry = run_scan(c->scan);
     ok = 1;
     if (carry != c->pass)
         ok = 0;
-    if (nout != c->nout)
+    if (npending != c->npending)
         ok = 0;
-    if (c->nout != 0 && nword0 != c->w0)
+    if (c->npending != 0 && pending0 != c->pending0)
         ok = 0;
-    if (c->nout >= 2 && nword1 != c->w1)
+    if (c->npending >= 2 && pending1 != c->pending1)
         ok = 0;
-    if (peekb(0x40, 0x17) != c->e17)
+    if (peekb(0x40, 0x17) != c->exp_flags17)
         ok = 0;
-    if (caps != c->ecap)
+    if (caps != c->exp_caps)
         ok = 0;
-    if (mod3a != c->em3a)
+    if (mod3a != c->exp_mod3a)
         ok = 0;
-    if (mod3b != c->em3b)
+    if (mod3b != c->exp_mod3b)
         ok = 0;
-    if (mod4a != c->em4a)
+    if (mod4a != c->exp_mod4a)
         ok = 0;
-    if (mod4b != c->em4b)
+    if (mod4b != c->exp_mod4b)
         ok = 0;
-    if (paused != c->epau)
+    if (suspended != c->exp_suspended)
         ok = 0;
     report(ok, c->name);
     return ok;
 }
 
-static int buf_case()
+static int typeahead_case()
 {
     unsigned tail;
     unsigned saved;
@@ -372,17 +372,17 @@ static int buf_case()
     tail = peekw(0x40, 0x1C);
     saved = peekw(0x40, tail);
     ok = 0;
-    if (try_put(0xABCD) == 0) {
+    if (store_word(0xABCD) == 0) {
         if (peekw(0x40, tail) == 0xABCD)
             ok = 1;
         pokew(0x40, tail, saved);
         pokew(0x40, 0x1C, tail);
     }
-    report(ok, "buffer\r\n$");
+    report(ok, "typeahead\r\n$");
     return ok;
 }
 
-/* On the 83-key map, scan 3Ah sets the two Ctrl bits and the break
+/* On the 83-key positions, scan 3Ah sets the two Ctrl bits and the break
    BAh clears them. The carry flag is not part of this check. */
 static int xt_ctrl_case()
 {
@@ -390,16 +390,16 @@ static int xt_ctrl_case()
 
     pokeb(0x40, 0x17, 0);
     pokeb(0x40, 0x18, 0);
-    fingers = 1;
+    key83 = 1;
     seen_e0 = 0;
-    paused = 0;
+    suspended = 0;
     ok = 1;
-    try_key(0x3A);
+    run_scan(0x3A);
     if (peekb(0x40, 0x17) != 0x04)
         ok = 0;
     if (peekb(0x40, 0x18) != 0x01)
         ok = 0;
-    try_key(0xBA);
+    run_scan(0xBA);
     if (peekb(0x40, 0x17) != 0)
         ok = 0;
     if (peekb(0x40, 0x18) != 0)
@@ -410,21 +410,21 @@ static int xt_ctrl_case()
 
 static int self_test()
 {
-    int has4f;
+    int bios_4f;
     unsigned char save17;
     unsigned char save18;
     int i;
     int passes;
     int fails;
 
-    has4f = detect();
-    say("Model $");
-    hexbyte(modelb);
-    say("\r\n$");
-    if (has4f)
-        say("INT 15h/4Fh yes\r\n$");
+    bios_4f = detect();
+    print("Model $");
+    hexbyte(model_byte);
+    print("\r\n$");
+    if (bios_4f)
+        print("INT 15h/4Fh yes\r\n$");
     else
-        say("INT 15h/4Fh no\r\n$");
+        print("INT 15h/4Fh no\r\n$");
     save17 = peekb(0x40, 0x17);
     save18 = peekb(0x40, 0x18);
     passes = 0;
@@ -435,7 +435,7 @@ static int self_test()
         else
             fails = fails + 1;
     }
-    if (buf_case())
+    if (typeahead_case())
         passes = passes + 1;
     else
         fails = fails + 1;
@@ -445,11 +445,11 @@ static int self_test()
         fails = fails + 1;
     pokeb(0x40, 0x17, save17);
     pokeb(0x40, 0x18, save18);
-    say("passed $");
-    putu(passes);
-    say(" failed $");
-    putu(fails);
-    say("\r\n$");
+    print("passed $");
+    print_dec(passes);
+    print(" failed $");
+    print_dec(fails);
+    print("\r\n$");
     if (fails)
         return 1;
     return 0;
@@ -458,12 +458,14 @@ static int self_test()
 /* The command tail is at offset 80h of the PSP. In the tiny model that
    offset is a near pointer: DS is the PSP. A bad switch asks for the
    help text, and so does /H. /? becomes a bad switch after the letter
-   fold and takes the same path. */
-static void parse(help, test, unload, force)
+   fold and takes the same path. key83_arg stays -1 when the command
+   does not choose positions. /XT sets it to 1 and /AT sets it to 0,
+   the same values as key83. */
+static void parse(help, test, remove, key83_arg)
 int *help;
 int *test;
-int *unload;
-int *force;
+int *remove;
+int *key83_arg;
 {
     unsigned char *tail;
     unsigned char *s;
@@ -473,8 +475,8 @@ int *force;
 
     *help = 0;
     *test = 0;
-    *unload = 0;
-    *force = 0;
+    *remove = 0;
+    *key83_arg = -1;
     tail = (unsigned char *)0x80;
     s = tail + 1;
     end = s + tail[0];
@@ -485,7 +487,7 @@ int *force;
         }
         c = s[1] & 0xDF;
         if (c == 'U')
-            *unload = 1;
+            *remove = 1;
         else if (c == 'T')
             *test = 1;
         else if (c == 'H')
@@ -493,13 +495,13 @@ int *force;
         else if (c == 'X') {
             d = s[2] & 0xDF;
             if (d == 'T')
-                *force = 1;
+                *key83_arg = 1;
             else
                 *help = 1;
         } else if (c == 'A') {
             d = s[2] & 0xDF;
             if (d == 'T')
-                *force = 2;
+                *key83_arg = 0;
             else
                 *help = 1;
         } else
@@ -514,41 +516,39 @@ void neo_main()
 {
     int help;
     int test;
-    int unload;
-    int force;
+    int remove;
+    int key83_arg;
     unsigned seg;
     unsigned entry;
-    int has4f;
+    int bios_4f;
 
     help = 0;
     test = 0;
-    unload = 0;
-    force = 0;
-    parse(&help, &test, &unload, &force);
+    remove = 0;
+    key83_arg = -1;
+    parse(&help, &test, &remove, &key83_arg);
     if (help) {
-        say(help_txt);
+        print(help_txt);
         dos_exit(0);
     }
     if (test)
         dos_exit(self_test());
-    if (find_res(&seg, &entry)) {
-        if (unload) {
-            do_unload(seg, entry);
-            say("Neo removed.\r\n$");
+    if (find_resident(&seg, &entry)) {
+        if (remove) {
+            remove_neo(seg, entry);
+            print("Neo removed.\r\n$");
             dos_exit(0);
         }
         show_status(seg, entry);
         dos_exit(1);
     }
-    if (unload) {
-        say("Neo is not resident.\r\n$");
+    if (remove) {
+        print("Neo is not resident.\r\n$");
         dos_exit(1);
     }
-    has4f = detect();
-    if (force == 1)
-        fingers = 1;
-    if (force == 2)
-        fingers = 0;
-    announce(has4f);
-    go_resident(has4f);
+    bios_4f = detect();
+    if (key83_arg >= 0)
+        key83 = key83_arg;
+    announce(bios_4f);
+    go_resident(bios_4f);
 }

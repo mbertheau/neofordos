@@ -10,7 +10,7 @@ On a 102-key keyboard, Mod3 is Caps Lock and the `#` key. Mod4 is the `<` key an
 
 On an 83-key keyboard, Mod3 is the key left of A and the `#` key. Mod4 is Alt. The wide key to the right of the space bar is Ctrl.
 
-Both Shift keys together toggle capitals for letters. Both Mod3 keys together suspend Neo and give character keys back to the BIOS. Shift, the real Ctrl key, left Alt, and the function keys stay with the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
+Holding one Shift key toggles capitals for letters when the key repeats. Both Mod3 keys together suspend Neo and pass character keys to the BIOS. Shift, the real Ctrl key, left Alt, and the function keys stay with the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
 
 Mod3 with Shift is layer 5. Mod3 with Mod4 is layer 6. Dead keys produce the spacing ASCII character. Shift on `ß` produces `S` then `S`. A character is produced when code page 437 can draw it. The euro sign, typographic quotes, and dashes are not in that font.
 
@@ -27,7 +27,7 @@ Load Neo after `KEYB`, or leave `KEYB` out. If the letters do not move, the acti
 | `NEO /XT` | Install with 83-key positions. |
 | `NEO /AT` | Install with 102-key positions. |
 
-The finger map follows the BIOS model byte. `FF`, `FE`, `FD`, and `FB` are 83-key. Every other model byte is 102-key. The hook is chosen separately: a BIOS that calls `INT 15h AH=4Fh` is hooked there, and an older XT BIOS gets a thin `INT 09h` wrapper. `NEO /XT` and `NEO /AT` change only the finger map.
+The key positions follow the BIOS model byte. `FF`, `FE`, `FD`, and `FB` are 83-key. Every other model byte is 102-key. The hook is chosen separately: a BIOS that calls `INT 15h AH=4Fh` is hooked there, and an older XT BIOS gets a thin `INT 09h` wrapper. `NEO /XT` and `NEO /AT` change only those positions.
 
 ## Building
 

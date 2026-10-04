@@ -17,7 +17,7 @@
 ; The driver owns Mod3, Mod4, and the main typing block. Shift, the real
 ; Ctrl key, left Alt, the function keys, and the system chords stay with
 ; the BIOS. The keypad stays with the BIOS until Mod3 or Mod4 is held.
-; An E0 prefix is given to the BIOS. The byte after it is kept only when
+; An E0 prefix is passed to the BIOS. The byte after it is kept only when
 ; it is AltGr, and the prefix bits at 0040:0096 are then cleared. E0 2A
 ; and E0 AA are the fake shift around a Num Lock arrow. They go back to
 ; the BIOS and are not a Shift press.
@@ -54,12 +54,13 @@ start:
 ; break, in AL. The BIOS has already read port 60h, and this path must
 ; not read it: the read would empty the controller.
 ;
-; fingers = 0 is the 102-key map, and only that map consults the prefix
+; key83 = 0 is the 102-key positions, and only those positions consult the prefix
 ; flags at 0040:0096. Bit 0 is the E1 prefix and bit 1 is E0. An E1
-; sequence is given back. An E0 byte sets seen_e0 for the decision
-; below. When the byte is eaten, both prefix bits are cleared.
+; sequence is passed back. An E0 byte sets seen_e0 for the decision
+; below. When the byte is kept, both prefix bits are cleared.
 ;
-; give holds the carry decision across the register restores. After
+; pass is 1 when the BIOS keeps AL and 0 when this driver keeps the
+; scan. The byte is read after the registers are restored. After
 ; push bp / mov bp,sp the saved flags of this interrupt are at [bp+6]:
 ; the interrupt frame is IP, CS, flags, and the saved BP sits in front
 ; of that. Clearing bit 0 of the flag word clears carry. The BIOS then
@@ -67,7 +68,7 @@ start:
 neo15:
     cmp ah, 4Fh
     je n15_body                     ; AH=4Fh: AL is the scan byte
-    jmp dword ptr cs:oldptr         ; any other AH: far jump, BIOS finishes it
+    jmp dword ptr cs:saved_vec         ; any other AH: far jump, BIOS finishes it
 n15_body:
     push ax
     push bx
@@ -77,11 +78,11 @@ n15_body:
     push di
     push ds
     push es
-    inc word ptr cs:hits
+    inc word ptr cs:scans
     mov bx, 40h
     mov es, bx                      ; ES = BIOS data segment 0040h
     mov byte ptr cs:seen_e0, 0
-    cmp byte ptr cs:fingers, 0
+    cmp byte ptr cs:key83, 0
     jne n15_go                      ; 83-key keyboard never sends E0
     test byte ptr es:[96h], 1       ; 0040:0096 bit 0, the E1 prefix
     jnz n15_pass                    ; E1 sequence: both bytes belong to the BIOS
@@ -91,16 +92,16 @@ n15_body:
 n15_go:
     call neo_handle                 ; carry set: BIOS keeps AL
     jc n15_pass
-    inc word ptr cs:eaten
-    cmp byte ptr cs:fingers, 0
+    inc word ptr cs:kept
+    cmp byte ptr cs:key83, 0
     jne n15_store                   ; 83-key path has no prefix bits
     and byte ptr es:[96h], 0FCh     ; 0FCh = 11111100b, clear E0 and E1
 n15_store:
     call flush_words
-    mov byte ptr cs:give, 0         ; 0 = clear carry on the way out
+    mov byte ptr cs:pass, 0         ; driver kept the scan: clear carry on the way out
     jmp n15_done
 n15_pass:
-    mov byte ptr cs:give, 1         ; 1 = leave the BIOS carry alone
+    mov byte ptr cs:pass, 1         ; BIOS keeps AL: leave carry set
 n15_done:
     pop es
     pop ds
@@ -110,8 +111,8 @@ n15_done:
     pop cx
     pop bx
     pop ax                          ; AL is the scan again, for the BIOS
-    cmp byte ptr cs:give, 0
-    jne n15_iret                    ; give=1: IRET with the flags unchanged
+    cmp byte ptr cs:pass, 0
+    jne n15_iret                    ; pass=1: IRET with the flags unchanged
     push bp
     mov bp, sp
     and byte ptr [bp+6], 0FEh       ; 0FEh = 11111110b, flag bit 0 is carry
@@ -136,12 +137,12 @@ neo09:
     push di
     push ds
     push es
-    inc word ptr cs:hits
+    inc word ptr cs:scans
     in al, 60h                      ; peek. Port 61h bit 7 is not pulsed yet
     mov byte ptr cs:seen_e0, 0      ; an 83-key keyboard has no E0 prefix
     call neo_handle
     jc n09_pass                     ; BIOS must still see this byte in the 8042
-    inc word ptr cs:eaten
+    inc word ptr cs:kept
     in al, 61h                      ; keyboard control. Other bits stay
     mov ah, al                      ; AH = original port 61h value
     or al, 80h                      ; bit 7 acknowledges the key
@@ -169,7 +170,7 @@ n09_pass:
     pop cx
     pop bx
     pop ax
-    jmp dword ptr cs:oldptr         ; BIOS acks port 61h and sends the EOI
+    jmp dword ptr cs:saved_vec         ; BIOS acks port 61h and sends the EOI
 
 ; Resident variables. A command that finds an already resident copy
 ; adds these offsets to the neo_state pointer stored in front of the
@@ -177,66 +178,67 @@ n09_pass:
 ; same bytes. The keystroke path keeps the names without the
 ; underscore.
 ;
-; fingers is 0 for the 102-key map and 1 for the 83-key map. mod3a and
-; mod3b are the two Mod3 keys. mod4a and mod4b are the two Mod4 keys.
-; A held key repeats, and a repeat must not toggle capitals or suspend,
-; so the flag remembers that the key is already down. caps is this
-; driver's capital state. BIOS bit 6 of 0040:0017 is kept in step with
-; it, and the Caps Lock scan is never passed through, so the BIOS does
-; not fight that bit. paused is suspend: both Mod3 keys together invert
-; it. nout, nword0, and nword1 are the characters waiting to be written.
-; hits counts scan bytes seen, and eaten counts bytes this driver kept.
-; oldptr is the BIOS vector that was replaced. hook15 says which vector
-; that was. modelb is the byte at F000:FFFE.
+; key83 is 0 for the 102-key positions and 1 for the 83-key positions.
+; mod3a and mod3b are the two Mod3 keys. mod4a and mod4b are the two
+; Mod4 keys. A held key repeats, and a repeat must not toggle capitals
+; or suspend, so each flag stays 1 while its key is down. caps is this
+; driver's capital state. BIOS bit 6 of 0040:0017 matches it, and the
+; Caps Lock scan is never passed through, so the BIOS does not fight
+; that bit. suspended flips when both Mod3 keys go down together.
+; npending is 0, 1, or 2. pending0 and pending1 are the typeahead words
+; not yet written. scans counts scan bytes that entered the hook. kept
+; counts the bytes this driver kept. saved_vec is the BIOS vector that
+; was replaced. hook15 says which vector that was. model_byte is the
+; byte at F000:FFFE.
 
 neo_state:
-public _fingers
-_fingers label byte
-fingers db 0                    ; +0   0 = 102-key, 1 = 83-key
+public _key83
+_key83 label byte
+key83      db 0                    ; +0   0 = 102-key, 1 = 83-key
 public _mod3a
 _mod3a label byte
-mod3a   db 0                    ; +1   first Mod3 key is down
+mod3a      db 0                    ; +1   first Mod3 key is down
 public _mod3b
 _mod3b label byte
-mod3b   db 0                    ; +2   second Mod3 key is down
+mod3b      db 0                    ; +2   second Mod3 key is down
 public _mod4a
 _mod4a label byte
-mod4a   db 0                    ; +3   first Mod4 key is down
+mod4a      db 0                    ; +3   first Mod4 key is down
 public _mod4b
 _mod4b label byte
-mod4b   db 0                    ; +4   second Mod4 key is down
+mod4b      db 0                    ; +4   second Mod4 key is down
 public _caps
 _caps label byte
-caps    db 0                    ; +5   driver caps, mirrored in 0017 bit 6
-public _paused
-_paused label byte
-paused  db 0                    ; +6   both Mod3 keys suspended Neo
+caps       db 0                    ; +5   driver caps, mirrored in 0017 bit 6
+public _suspended
+_suspended label byte
+suspended  db 0                    ; +6   both Mod3 keys: Neo is suspended
 public _seen_e0
 _seen_e0 label byte
-seen_e0 db 0                    ; +7   this scan byte followed an E0
-public _nout
-_nout label byte
-nout    db 0                    ; +8   0, 1, or 2 words waiting
-give    db 0                    ; +9   carry to hand back to the BIOS
-public _nword0
-_nword0 label word
-nword0  dw 0                    ; +10  first typeahead word
-public _nword1
-_nword1 label word
-nword1  dw 0                    ; +12  second word, used for SS
-public _hits
-_hits label word
-hits    dw 0                    ; +14  scan bytes seen
-public _eaten
-_eaten label word
-eaten   dw 0                    ; +16  scan bytes this driver kept
-oldptr  label dword
-oldoff  dw 0                    ; +18  saved vector offset
-oldseg  dw 0                    ; +20  saved vector segment
-hook15  db 0                    ; +22  1 = INT 15h, 0 = INT 09h
-public _modelb
-_modelb label byte
-modelb  db 0                    ; +23  byte read from F000:FFFE
+seen_e0    db 0                    ; +7   this scan byte followed an E0
+public _npending
+_npending label byte
+npending   db 0                    ; +8   0, 1, or 2 typeahead words waiting
+pass       db 0                    ; +9   1 = the BIOS keeps AL
+public _pending0
+_pending0 label word
+pending0   dw 0                    ; +10  first typeahead word
+public _pending1
+_pending1 label word
+pending1   dw 0                    ; +12  second word, the second S of SS
+public _scans
+_scans label word
+scans      dw 0                    ; +14  scan bytes that entered the hook
+public _kept
+_kept label word
+kept       dw 0                    ; +16  scan bytes this driver kept
+saved_vec  label dword
+saved_off  dw 0                    ; +18  saved vector offset
+saved_seg  dw 0                    ; +20  saved vector segment
+hook15     db 0                    ; +22  1 = INT 15h, 0 = INT 09h
+public _model_byte
+_model_byte label byte
+model_byte db 0                    ; +23  byte at F000:FFFE
 
 ; The layer table is indexed by the physical scan code: the position on
 ; a German keyboard, not the letter printed on the key. Scan 02h is the
@@ -458,9 +460,9 @@ kpslash:
 ; One scan byte enters here. AL may be a make or a break. BL is the
 ; scan with the break bit removed, and BH is that break bit alone.
 ; seen_e0 is 1 when the 102-key path saw an E0 prefix on this byte.
-; Carry set tells the caller to give the byte to the BIOS. Carry clear
-; tells the caller to drop it. nout is then 0, 1, or 2, and nword0 and
-; nword1 are the typeahead words.
+; Carry set tells the caller to pass the byte to the BIOS. Carry clear
+; tells the caller to keep it. npending is then 0, 1, or 2, and pending0 and
+; pending1 are the typeahead words.
 neo_handle proc near
     mov bl, al
     and bl, 7Fh                     ; BL = scan. Bit 7 is the break flag
@@ -470,29 +472,29 @@ neo_handle proc near
     push si
     mov ax, 40h
     mov es, ax                      ; ES = BIOS data, for 0017h and 0018h
-    mov byte ptr cs:nout, 0
-    mov word ptr cs:nword0, 0
-    mov word ptr cs:nword1, 0
+    mov byte ptr cs:npending, 0
+    mov word ptr cs:pending0, 0
+    mov word ptr cs:pending1, 0
 ; E0 2Ah is the fake left shift around a Num Lock arrow, and it is not
 ; treated as Shift. The break of that fake key is E0 AAh, which lands
-; here with BL = 2Ah as well. Every other byte is offered to try_mod.
-; A modifier this driver owns is eaten, break as well as make.
+; here with BL = 2Ah as well. Every other byte is offered to claim_mod.
+; A modifier this driver owns is kept, break as well as make.
     cmp byte ptr cs:seen_e0, 0
     je nh_mods                      ; no E0: 2Ah would be a real Shift
     cmp bl, 2Ah
     jne nh_mods                     ; E0 of some other key
     jmp nh_pass                     ; phantom shift: BIOS handles it
 nh_mods:
-    call try_mod                    ; DL = 1 when this driver owns BL
+    call claim_mod                    ; DL = 1 when this driver owns BL
     or dl, dl
     jz nh_notmod                    ; DL = 0: not Mod3, Mod4, or XT Ctrl
-    jmp nh_eat                      ; owned modifier: swallow make and break
-; Suspend gives character keys back to the BIOS. Mod3 and Mod4 were
-; already eaten, so a suspended driver does not release those keys.
+    jmp nh_keep                      ; owned modifier: keep the make and the break
+; Suspend passes character keys to the BIOS. Mod3 and Mod4 were
+; already kept, so a suspended driver does not release those keys.
 nh_notmod:
-    cmp byte ptr cs:paused, 0
-    je nh_run                       ; paused = 0: translate the key
-    jmp nh_pass                     ; paused = 1: character key goes to BIOS
+    cmp byte ptr cs:suspended, 0
+    je nh_run                       ; suspended = 0: translate the key
+    jmp nh_pass                     ; suspended = 1: character key goes to BIOS
 ; A Shift make toggles capitals when that Shift's bit is already set in
 ; 0040:0017 and the other Shift bit is clear. The first make still has
 ; a clear bit, so it is passed through and the BIOS records it. A later
@@ -530,7 +532,7 @@ nh_shright:
     jnz nh_tog                      ; repeat of right Shift: toggle
     jmp nh_pass                     ; first make of right Shift
 ; The main typing block is owned on make and on break. The break of an
-; owned key is eaten and produces nothing. E0 35h is the keypad slash
+; owned key is kept and produces nothing. E0 35h is the keypad slash
 ; rather than J, and the keypad scans are owned only while Mod3 or Mod4
 ; is down. With neither Mod key down, those scans go to the BIOS.
 ; The short conditional cannot reach nh_pass from here, so a miss is
@@ -544,7 +546,7 @@ nh_own:
     jc nh_isown
     jmp nh_pass                     ; slash with no Mod key: BIOS types /
 nh_ownb:
-    call owned_p                    ; carry set: BL is in the typing block
+    call is_typing_block                    ; carry set: BL is in the typing block
     jc nh_isown
     call kp_layer                   ; carry set: Mod key claims this keypad scan
     jc nh_isown
@@ -552,7 +554,7 @@ nh_ownb:
 nh_isown:
     or bh, bh
     jz nh_char                      ; make: choose a layer and emit
-    jmp nh_eat                      ; break of an owned key: emit nothing
+    jmp nh_keep                      ; break of an owned key: emit nothing
 nh_tog:
     xor byte ptr cs:caps, 1         ; flip the driver's own capital state
     xor byte ptr es:[17h], 40h      ; 40h is bit 6, the BIOS Caps Lock flag
@@ -590,11 +592,11 @@ nh_m3:
     mov dh, 3
     jmp nh_pick
 ; Neither Mod key is down. Ctrl and Alt together are passed through, so
-; Ctrl+Alt+Del still reaches the BIOS on the 102-key map. Alt alone
+; Ctrl+Alt+Del still reaches the BIOS on the 102-key positions. Alt alone
 ; writes a zero character with the physical scan in the high byte, the
 ; same shape the BIOS uses for an Alt combination. Ctrl on a layer-1
 ; letter writes the control character of that Neo letter. Ctrl on any
-; other cell is eaten. This block is not used while Mod3 is down, so
+; other cell is kept. This block is not used while Mod3 is down, so
 ; Mod3 wins over Ctrl.
 ;
 ; With neither Ctrl nor Alt, layer 1 is loaded and the character is
@@ -645,42 +647,42 @@ nh_pick:
     jne nh_one
     cmp dh, 2                       ; only layer 2 wants the capital sz
     jne nh_one
-    mov word ptr cs:nword0, 1A53h   ; scan 1Ah, character 'S'
-    mov word ptr cs:nword1, 1A53h   ; second 'S'
-    mov byte ptr cs:nout, 2
-    jmp nh_eat
+    mov word ptr cs:pending0, 1A53h   ; scan 1Ah, character 'S'
+    mov word ptr cs:pending1, 1A53h   ; second 'S'
+    mov byte ptr cs:npending, 2
+    jmp nh_keep
 nh_one:
     call load_layer                 ; AX = typeahead word, or 0 if empty
     or ax, ax
-    jz nh_eat                       ; empty cell: swallow the scan, emit nothing
-    mov cs:nword0, ax
-    mov byte ptr cs:nout, 1
+    jz nh_keep                       ; empty cell: keep the scan, emit nothing
+    mov cs:pending0, ax
+    mov byte ptr cs:npending, 1
     cmp ax, 5200h                   ; scan 52h, character 00h: Insert
-    jne nh_eat
+    jne nh_keep
     xor byte ptr es:[17h], 80h      ; 80h is bit 7, the Insert flag
-    jmp nh_eat
+    jmp nh_keep
 nh_alt:
     mov ah, bl                      ; high byte = the physical scan
     xor al, al                      ; low byte = 0, the BIOS Alt-key shape
-    mov cs:nword0, ax
-    mov byte ptr cs:nout, 1
-    jmp nh_eat
+    mov cs:pending0, ax
+    mov byte ptr cs:npending, 1
+    jmp nh_keep
 nh_ctrl:
     mov dh, 1                       ; control character comes from layer 1
     call load_layer
     cmp al, 'a'
-    jb nh_eat                       ; not a Neo letter: swallow, emit nothing
+    jb nh_keep                       ; not a Neo letter: keep it, emit nothing
     cmp al, 'z'
-    ja nh_eat
+    ja nh_keep
     and al, 1Fh                     ; 'a'..'z' to 01h..1Ah, Ctrl-A..Ctrl-Z
     mov ah, bl                      ; high byte stays the physical scan
-    mov cs:nword0, ax
-    mov byte ptr cs:nout, 1
-nh_eat:
-    clc                             ; caller drops this scan byte
+    mov cs:pending0, ax
+    mov byte ptr cs:npending, 1
+nh_keep:
+    clc                             ; caller keeps this scan byte
     jmp nh_leave
 nh_pass:
-    stc                             ; caller gives this scan byte to the BIOS
+    stc                             ; caller passes this scan byte to the BIOS
 nh_leave:
     pop si
     pop es
@@ -688,147 +690,147 @@ nh_leave:
 neo_handle endp
 
 ; Decide whether BL is a modifier this driver owns. DL is 1 when it is.
-; On the 102-key map, Mod3 is Caps Lock (3Ah) and the # key (2Bh).
-; Mod4 is the < key (56h) and AltGr (E0 38h). On the 83-key map, Mod3
+; On the 102-key positions, Mod3 is Caps Lock (3Ah) and the # key (2Bh).
+; Mod4 is the < key (56h) and AltGr (E0 38h). On the 83-key positions, Mod3
 ; is the key left of A (1Dh) and the # key (2Bh). Mod4 is Alt (38h).
 ; The wide key right of the space bar (3Ah) is not passed to the BIOS.
 ; Its make sets the Ctrl bits, 0040:0017 bit 2 and 0040:0018 bit 0, and
 ; its break clears them. A make that finds the key already down returns
 ; without toggling suspend or capitals. Suspend flips only on the make
 ; that finds the other Mod3 key already down.
-try_mod proc near
+claim_mod proc near
     xor dl, dl                      ; DL = 0 until a key is claimed
-    cmp byte ptr cs:fingers, 0
-    jne tm_xt                       ; 83-key: Mod3 is 1Dh, not 3Ah
+    cmp byte ptr cs:key83, 0
+    jne cm_xt                       ; 83-key: Mod3 is 1Dh, not 3Ah
     cmp bl, 3Ah                     ; 102-key Mod3: Caps Lock
-    jne tm_m3r
-    jmp tm_m3a
-tm_xt:
+    jne cm_m3r
+    jmp cm_m3a
+cm_xt:
     cmp bl, 1Dh                     ; 83-key Mod3: the key left of A
-    jne tm_m3r                      ; not it: 2Bh is the other Mod3 on both maps
-tm_m3a:
-    mov dl, 1                       ; claimed. Caller will eat the byte
+    jne cm_m3r                      ; not it: 2Bh is the other Mod3 on both maps
+cm_m3a:
+    mov dl, 1                       ; claimed. The caller keeps the byte
     or bh, bh
-    jnz tm_m3a_up                   ; BH = 80h: break, just clear the flag
+    jnz cm_m3a_up                   ; BH = 80h: break, just clear the flag
     cmp byte ptr cs:mod3a, 0
-    je tm_3a_new                    ; first make
+    je cm_3a_new                    ; first make
     ret                             ; repeat: do not toggle suspend again
-tm_3a_new:
+cm_3a_new:
     mov byte ptr cs:mod3a, 1
     cmp byte ptr cs:mod3b, 0
-    jne tm_3a_both                  ; the other Mod3 is already down
+    jne cm_3a_both                  ; the other Mod3 is already down
     ret
-tm_3a_both:
-    xor byte ptr cs:paused, 1       ; both Mod3 keys: flip suspend
+cm_3a_both:
+    xor byte ptr cs:suspended, 1       ; both Mod3 keys: flip suspend
     ret
-tm_m3a_up:
+cm_m3a_up:
     mov byte ptr cs:mod3a, 0
-    jmp tm_ret
-tm_m3r:
+    jmp cm_ret
+cm_m3r:
     cmp bl, 2Bh                     ; 2Bh is the # key, Mod3 on both maps
-    jne tm_m4
+    jne cm_m4
     mov dl, 1
     or bh, bh
-    jnz tm_m3b_up
+    jnz cm_m3b_up
     cmp byte ptr cs:mod3b, 0
-    je tm_3b_new
+    je cm_3b_new
     ret                             ; repeat of this Mod3 key
-tm_3b_new:
+cm_3b_new:
     mov byte ptr cs:mod3b, 1
     cmp byte ptr cs:mod3a, 0
-    jne tm_3b_both
+    jne cm_3b_both
     ret
-tm_3b_both:
-    xor byte ptr cs:paused, 1
+cm_3b_both:
+    xor byte ptr cs:suspended, 1
     ret
-tm_m3b_up:
+cm_m3b_up:
     mov byte ptr cs:mod3b, 0
-    jmp tm_ret
-tm_m4:
-    cmp byte ptr cs:fingers, 0
-    jne tm_xt4                      ; 83-key Mod4 is Alt, not the < key
+    jmp cm_ret
+cm_m4:
+    cmp byte ptr cs:key83, 0
+    jne cm_xt4                      ; 83-key Mod4 is Alt, not the < key
     cmp bl, 56h                     ; 102-key Mod4: the < key
-    jne tm_agr
+    jne cm_agr
     mov dl, 1
     or bh, bh
-    jnz tm_m4a_up
+    jnz cm_m4a_up
     mov byte ptr cs:mod4a, 1        ; a repeat just stores 1 again
-    jmp tm_ret
-tm_m4a_up:
+    jmp cm_ret
+cm_m4a_up:
     mov byte ptr cs:mod4a, 0
-    jmp tm_ret
-tm_agr:
+    jmp cm_ret
+cm_agr:
     cmp byte ptr cs:seen_e0, 0
-    je tm_ret                       ; 38h without E0 is left Alt: not ours
+    je cm_ret                       ; 38h without E0 is left Alt: not ours
     cmp bl, 38h                     ; E0 38h is AltGr
-    jne tm_ret
+    jne cm_ret
     mov dl, 1
     or bh, bh
-    jnz tm_m4b_up
+    jnz cm_m4b_up
     mov byte ptr cs:mod4b, 1
-    jmp tm_ret
-tm_m4b_up:
+    jmp cm_ret
+cm_m4b_up:
     mov byte ptr cs:mod4b, 0
-    jmp tm_ret
-tm_xt4:
+    jmp cm_ret
+cm_xt4:
     cmp bl, 38h                     ; 83-key Mod4: Alt, no E0 on this keyboard
-    jne tm_xtc
+    jne cm_xtc
     mov dl, 1
     or bh, bh
-    jnz tm_x4_up
+    jnz cm_x4_up
     mov byte ptr cs:mod4b, 1
-    jmp tm_ret
-tm_x4_up:
+    jmp cm_ret
+cm_x4_up:
     mov byte ptr cs:mod4b, 0
-    jmp tm_ret
-tm_xtc:
+    jmp cm_ret
+cm_xtc:
     cmp bl, 3Ah                     ; 83-key: wide key right of the space bar
-    jne tm_ret                      ; not ours. DL is still 0
+    jne cm_ret                      ; not ours. DL is still 0
     mov dl, 1
     or bh, bh
-    jnz tm_xc_up
+    jnz cm_xc_up
     or byte ptr es:[17h], 04h       ; bit 2 of 0040:0017, Ctrl
     or byte ptr es:[18h], 01h       ; bit 0 of 0040:0018, left Ctrl
-    jmp tm_ret
-tm_xc_up:
+    jmp cm_ret
+cm_xc_up:
     and byte ptr es:[17h], 0FBh     ; 0FBh = 11111011b, clear Ctrl
     and byte ptr es:[18h], 0FEh     ; 0FEh = 11111110b, clear left Ctrl
-tm_ret:
+cm_ret:
     ret
-try_mod endp
+claim_mod endp
 
 ; Carry set when BL is on the main typing block: the space bar, the key
 ; left of 1, the number row through the acute key, the three letter
 ; rows. The keypad, the function keys, and both Shift keys are outside
 ; these ranges.
-owned_p proc near
+is_typing_block proc near
     cmp bl, 39h                     ; space bar
-    je ow_y
+    je tb_y
     cmp bl, 29h                     ; key left of 1
-    je ow_y
+    je tb_y
     cmp bl, 02h                     ; below the 1 key: Esc and nothing
-    jb ow_n
+    jb tb_n
     cmp bl, 0Dh                     ; 1 through the acute key. 0Eh is Backspace
-    jbe ow_y
+    jbe tb_y
     cmp bl, 10h                     ; 0Eh and 0Fh are Backspace and Tab
-    jb ow_n
+    jb tb_n
     cmp bl, 1Bh                     ; Q row through the + key. 1Ch is Enter
-    jbe ow_y
+    jbe tb_y
     cmp bl, 1Eh                     ; 1Ch Enter, 1Dh Ctrl
-    jb ow_n
+    jb tb_n
     cmp bl, 28h                     ; A row through the ae key
-    jbe ow_y
+    jbe tb_y
     cmp bl, 2Ch                     ; 2Ah is left Shift and 2Bh is the # key
-    jb ow_n
+    jb tb_n
     cmp bl, 35h                     ; Y row through J. 36h is right Shift
-    jbe ow_y
-ow_n:
+    jbe tb_y
+tb_n:
     clc                             ; keypad, function keys, and Shift are outside
     ret
-ow_y:
+tb_y:
     stc
     ret
-owned_p endp
+is_typing_block endp
 
 ; BL is the scan and DH is the layer, 1 through 6. AX comes back as the
 ; typeahead word, or zero when the cell is empty. E0 35h reads kpslash
@@ -945,17 +947,18 @@ il_y:
 is_letter endp
 
 ; Write the one or two words neo_handle prepared. A full typeahead
-; buffer drops the word. The caller has already decided to eat the scan
-; byte, so the key is not handed back when the buffer cannot take it.
+; buffer does not store the word. The caller has already decided to
+; keep the scan byte, so the key is not passed back when the buffer
+; cannot take it.
 flush_words proc near
-    cmp byte ptr cs:nout, 0
-    je fw_ret                       ; eaten key with an empty cell
-    mov ax, cs:nword0               ; AX = character in AL, scan in AH
-    call neo_put                    ; carry set means the buffer was full
-    cmp byte ptr cs:nout, 2
+    cmp byte ptr cs:npending, 0
+    je fw_ret                       ; kept key with an empty cell
+    mov ax, cs:pending0               ; AX = character in AL, scan in AH
+    call store_word                    ; carry set means the buffer was full
+    cmp byte ptr cs:npending, 2
     jb fw_ret                       ; one word is the normal key
-    mov ax, cs:nword1               ; second word is the second S of SS
-    call neo_put                    ; a full buffer drops it; the scan stays eaten
+    mov ax, cs:pending1               ; second word is the second S of SS
+    call store_word                    ; full buffer: word not stored; the scan stays kept
 fw_ret:
     ret
 flush_words endp
@@ -976,7 +979,7 @@ flush_words endp
 ; tested after BP itself is popped. This routine does not enable
 ; interrupts on its own. The keyboard interrupt is already running with
 ; them off, and it should stay that way until the BIOS is finished.
-neo_put proc near
+store_word proc near
     push bp
     push ds
     push bx
@@ -990,36 +993,36 @@ neo_put proc near
     mov bx, ds:[80h]                ; 0040:0080, buffer start, if the BIOS moved it
     mov cx, ds:[82h]                ; 0040:0082, buffer end
     cmp bx, 1Eh
-    jb put_def                      ; start below 001Eh is not the keyboard buffer
+    jb st_def                      ; start below 001Eh is not the keyboard buffer
     cmp cx, bx
-    jbe put_def                     ; end must be above the start
+    jbe st_def                     ; end must be above the start
     cmp cx, 0A0h
-    ja put_def                      ; end past 00A0h is outside the BIOS data area
+    ja st_def                      ; end past 00A0h is outside the BIOS data area
     test bl, 1
-    jnz put_def                     ; a word buffer is even
+    jnz st_def                     ; a word buffer is even
     test cl, 1
-    jnz put_def
-    jmp put_have                    ; BX = start, CX = end
-put_def:
+    jnz st_def
+    jmp st_have                    ; BX = start, CX = end
+st_def:
     mov bx, 1Eh                     ; original buffer, 0040:001E
     mov cx, 3Eh                     ; through 0040:003E
-put_have:
+st_have:
     mov di, ds:[1Ch]                ; DI = tail, the next word to fill
     mov dx, di
     add dx, 2                       ; DX = the tail after this word
     cmp dx, cx
-    jb put_nw                       ; still inside the buffer
+    jb st_nw                       ; still inside the buffer
     mov dx, bx                      ; wrapped to the start
-put_nw:
+st_nw:
     cmp dx, ds:[1Ah]                ; 0040:001A is the head
-    je put_full                     ; next tail would meet the head
+    je st_full                     ; next tail would meet the head
     mov [di], ax                    ; store character, then scan
     mov ds:[1Ch], dx                ; publish the new tail
     xor bp, bp                      ; BP = 0: stored. POP does not change flags
-    jmp put_out
-put_full:
-    mov bp, 1                       ; BP = 1: dropped
-put_out:
+    jmp st_out
+st_full:
+    mov bp, 1                       ; BP = 1: the word was not stored
+st_out:
     popf                            ; interrupts back to the caller's state
     pop di
     pop dx
@@ -1028,13 +1031,13 @@ put_out:
     pop ds
     or bp, bp                       ; test the saved result, now that BP is free
     pop bp
-    jnz put_stc                     ; the OR result survives the POP
+    jnz st_stc                     ; the OR result survives the POP
     clc
     ret
-put_stc:
-    stc                             ; caller ignores this; the scan is already eaten
+st_stc:
+    stc                             ; caller ignores this; the scan is already kept
     ret
-neo_put endp
+store_word endp
 
 ; Stack for the keyboard interrupt and for the INT 21h that ends
 ; installation. The installer points SS:SP at resident_end only after
@@ -1078,8 +1081,8 @@ _putch proc near
     ret
 _putch endp
 
-public _say
-_say proc near
+public _print
+_print proc near
     push bp
     mov bp, sp
     mov dx, [bp+4]
@@ -1087,7 +1090,7 @@ _say proc near
     int 21h
     pop bp
     ret
-_say endp
+_print endp
 
 public _peekb
 _peekb proc near
@@ -1145,45 +1148,45 @@ _pokew proc near
 _pokew endp
 
 ; Carry set means the BIOS keeps this scan byte. neo_handle leaves the
-; carry flag set for that and clear when this driver eats the byte.
-public _try_key
-_try_key proc near
+; carry flag set for that and clear when this driver keeps the byte.
+public _run_scan
+_run_scan proc near
     push bp
     mov bp, sp
     mov al, [bp+4]                  ; C passes the scan as a word; the byte is in AL
     call neo_handle                 ; carry survives the near RET
-    jc tk_pass                      ; carry set: BIOS would keep the byte
-    xor ax, ax                      ; AX = 0: this driver ate it
-    jmp tk_out
-tk_pass:
+    jc rs_pass                      ; carry set: BIOS would keep the byte
+    xor ax, ax                      ; AX = 0: this driver kept it
+    jmp rs_out
+rs_pass:
     mov ax, 1                       ; AX = 1: the byte is passed through
-tk_out:
+rs_out:
     pop bp
     ret
-_try_key endp
+_run_scan endp
 
 ; Carry set means the typeahead buffer was full and the word was not
-; stored. neo_put saves and restores DS.
-public _try_put
-_try_put proc near
+; stored. store_word saves and restores DS.
+public _store_word
+_store_word proc near
     push bp
     mov bp, sp
     mov ax, [bp+4]                  ; the typeahead word
-    call neo_put
-    jc tp_full                      ; carry set: the ring was full
+    call store_word
+    jc ws_full                      ; carry set: the ring was full
     xor ax, ax
-    jmp tp_out
-tp_full:
+    jmp ws_out
+ws_full:
     mov ax, 1
-tp_out:
+ws_out:
     pop bp
     ret
-_try_put endp
+_store_word endp
 
 ; AH=35h returns the vector in ES:BX. BX is not saved across that call:
 ; the vector offset is the value the call returns there.
-public _vec_at
-_vec_at proc near
+public _read_vector
+_read_vector proc near
     push bp
     mov bp, sp
     push di
@@ -1197,37 +1200,37 @@ _vec_at proc near
     pop di
     pop bp
     ret
-_vec_at endp
+_read_vector endp
 
 ; INT 15h AH=C0h returns its table in ES:BX. BX must not be saved across
 ; that interrupt. AX is 1 when feature bit 4 is set, which means the
 ; BIOS calls INT 15h AH=4Fh.
-public _bios_c0
-_bios_c0 proc near
+public _has_4f
+_has_4f proc near
     push si
     push di
     mov ah, 0C0h                    ; return the BIOS configuration table
     stc                             ; a BIOS that ignores C0h leaves carry set
     int 15h                         ; ES:BX = table. Do not push BX around this
-    jc c0_no                        ; no table
+    jc no_4f                        ; no table
     test byte ptr es:[bx+5], 10h    ; feature byte 1, bit 4: INT 15h AH=4Fh
-    jz c0_no
+    jz no_4f
     mov ax, 1
-    jmp c0_out
-c0_no:
+    jmp out_4f
+no_4f:
     xor ax, ax                      ; AX = 0: hook INT 09h instead
-c0_out:
+out_4f:
     pop di
     pop si
     ret
-_bios_c0 endp
+_has_4f endp
 
 ; Restore the saved vector, free the resident PSP, then free the
 ; environment at that PSP's offset 2Ch when the word is not zero. DS is
 ; the BIOS segment during the vector write, and it is this program's
 ; segment again before the return, so the caller can print.
-public _do_unload
-_do_unload proc near
+public _remove_neo
+_remove_neo proc near
     push bp
     mov bp, sp
     push si
@@ -1236,15 +1239,15 @@ _do_unload proc near
     mov si, es:[bx-2]               ; SI = neo_state offset in that segment
     mov ax, es:[2Ch]                ; PSP:002Ch is the environment segment
     mov cs:envseg, ax
-    mov dx, es:[si + (oldoff - neo_state)]  ; DX = saved vector offset
-    mov cx, es:[si + (oldseg - neo_state)]  ; CX = saved vector segment
+    mov dx, es:[si + (saved_off - neo_state)]  ; DX = saved vector offset
+    mov cx, es:[si + (saved_seg - neo_state)]  ; CX = saved vector segment
     push es                         ; keep the resident PSP across the set-vector
     mov ds, cx                      ; AH=25h reads DS:DX
     mov ax, 2509h                   ; default: put back INT 09h
     cmp byte ptr es:[si + (hook15 - neo_state)], 0
-    je ul_set                       ; hook15 = 0: it was INT 09h
+    je rm_set                       ; hook15 = 0: it was INT 09h
     mov ax, 2515h                   ; hook15 = 1: it was INT 15h
-ul_set:
+rm_set:
     cli
     int 21h
     sti
@@ -1255,15 +1258,15 @@ ul_set:
     pop ds                          ; DS = this transient program, for the caller
     mov ax, cs:envseg
     or ax, ax
-    jz ul_done                      ; no environment paragraph
+    jz rm_done                      ; no environment paragraph
     mov es, ax
     mov ah, 49h                     ; free the environment
     int 21h
-ul_done:
+rm_done:
     pop si
     pop bp
     ret
-_do_unload endp
+_remove_neo endp
 
 ; Hook INT 15h or INT 09h, close handles 0 through 19, move the stack to
 ; resident_end, and stay resident. The banner has already been printed.
@@ -1277,8 +1280,8 @@ _go_resident proc near
     mov byte ptr cs:hook15, 1       ; remember that the hooked vector is 15h
     mov ax, 3515h                   ; read the current INT 15h
     int 21h                         ; ES:BX = BIOS handler
-    mov cs:oldoff, bx
-    mov cs:oldseg, es
+    mov cs:saved_off, bx
+    mov cs:saved_seg, es
     cli
     push ds
     push cs
@@ -1293,8 +1296,8 @@ gr_09:
     mov byte ptr cs:hook15, 0
     mov ax, 3509h
     int 21h
-    mov cs:oldoff, bx
-    mov cs:oldseg, es
+    mov cs:saved_off, bx
+    mov cs:saved_seg, es
     cli
     push ds
     push cs
