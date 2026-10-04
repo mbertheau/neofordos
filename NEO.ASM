@@ -618,7 +618,6 @@ nh_noctl:
     jnz nh_ctrl                     ; Ctrl without Alt
     mov dh, 1                       ; neither: start from layer 1
     call load_layer                 ; AL = character, AH = scan
-    mov cl, al                      ; CL keeps it. is_letter reads AL
     call is_letter                  ; carry set: a-z, ue, ae, oe, or sz
     jc nh_let
     test ch, 03h                    ; non-letter: any Shift bit?
