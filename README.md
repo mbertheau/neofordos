@@ -22,7 +22,6 @@ Load Neo after `KEYB`, or leave `KEYB` out. If the letters do not move, the acti
 |---|---|
 | `NEO` | Install. When Neo is already resident, print the counters. |
 | `NEO /U` | Remove Neo. |
-| `NEO /T` | Run the self-test and exit. |
 | `NEO /H` | Print the command list. |
 | `NEO /XT` | Install with 83-key positions. |
 | `NEO /AT` | Install with 102-key positions. |
@@ -31,6 +30,6 @@ The key positions follow the BIOS model byte. `FF`, `FE`, `FD`, and `FB` are 83-
 
 ## Building
 
-The resident driver is 8086 assembly for Turbo Assembler 2.01. The commands and the self-test are Turbo C 2.01, tiny model, also limited to the 8086. Do not enable 186 instructions. `TASM`, `TLINK`, and `TCC` must be on the path, with the Turbo Assembler directory first so its linker is the one that runs. `NEO.ASM`, `NEOCMD.C`, and `BUILD.BAT` use CR LF line endings.
+The resident driver is 8086 assembly for Turbo Assembler 2.01. The commands are Turbo C in `NEOCMD.C`, linked into `NEO.COM`. The self-test is Turbo C in `NEOTST.C`, linked with the same driver into `NEOTST.COM`. Both are tiny model, limited to the 8086. Do not enable 186 instructions. `TASM`, `TLINK`, and `TCC` must be on the path, with the Turbo Assembler directory first so its linker is the one that runs. `NEO.ASM`, `NEOCMD.C`, `NEOTST.C`, and `BUILD.BAT` use CR LF line endings.
 
-From the source directory, run `BUILD`. The `NEO.COM` in the repository is a build of this source.
+From the source directory, run `BUILD`. The `NEO.COM` and `NEOTST.COM` in the repository are builds of this source.

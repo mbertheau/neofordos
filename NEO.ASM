@@ -1,9 +1,10 @@
 ; Neo, layers 1-6, for the IBM 5160 and later PCs.
 ;
 ; Read this file from the top. A keystroke executes only the resident
-; driver, which ends at resident_end. NEOCMD.C is the command program:
-; the switches, the messages, and the self-test. It is linked after
-; resident_end, and DOS releases it when the driver stays resident.
+; driver, which ends at resident_end. NEO.COM links NEOCMD.C after
+; that point: the switches and the messages. DOS releases them when
+; the driver stays resident. NEOTST.COM links NEOTST.C instead and
+; calls the same neo_handle. The self-test is not part of NEO.COM.
 ; Installing and removing the driver stay here, because that is where
 ; the stack and the open handles have to be exact.
 ;
@@ -1045,10 +1046,10 @@ store_word endp
     dw 64 dup (0)
 resident_end:
 
-; From here on, nothing stays resident. NEOCMD.C is linked after this
-; point and calls the wrappers below. A wrapper does one interrupt or
-; one memory access. The C code decides what to print and which command
-; to run. go_resident does not return.
+; From here on, nothing stays resident. The program linked after this
+; point calls the wrappers below. NEO.COM links NEOCMD.C. NEOTST.COM
+; links NEOTST.C. A wrapper does one interrupt or one memory access.
+; go_resident does not return.
 
 EXTRN _neo_main:NEAR
 
